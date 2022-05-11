@@ -1,3 +1,4 @@
+from curses.ascii import DEL
 import re
 from manim import *
 from manim_speech import VoiceoverScene
@@ -6,7 +7,19 @@ from math import floor, ceil
 import json
 import manimpango
 
-dict1 = json.loads(open("book-01-proposition-47.json").read())
+dict1 = json.loads(open("book-01-proposition-47-short.json").read())
+# dict1 = json.loads(open("book-01-proposition-47.json").read())
+
+# GLOBAL_SPEED = 1.15
+# AUDIO_OFFSET = 0.0
+
+GLOBAL_SPEED = 1
+AUDIO_OFFSET = 0.1
+BASE_SHAPE_COLOR = GRAY_D
+BASE_DOT_COLOR = GRAY_C
+BASE_TEXT_COLOR = GRAY_C
+
+HIGHLIGHT_COLOR = YELLOW_B
 
 
 class Bookmark:
@@ -93,6 +106,7 @@ def transpose_label(coor, arr, size):
         else:
             transform_ = [0.1 * l, -0.1 * l]
         transform_[0] += 0.5
+        transform_[1] -= 0.3
         return np.array(transform_ + [0])
 
     if isinstance(mode, float):
@@ -106,8 +120,23 @@ def transpose_label(coor, arr, size):
     return np.array(coor + [0]) + transform_
 
 
+def get_shape(dict_, tag: str):
+    letters, type_ = tag.split(" ")
+
+    if type_ == "line":
+        points = [dict_["points"][i] for i in letters]
+        return Line(start=points[0], end=points[1]).set_color(HIGHLIGHT_COLOR)
+    elif type_ == "polygon":
+        if letters in dict_["polygonl"]:
+            letters = dict_["polygonl"][letters]
+        points = [dict_["points"][i] for i in letters]
+        return Polygon(*points).set_color(HIGHLIGHT_COLOR)
+    else:
+        raise Exception(type_)
+
+
 def generate_scene(
-    dict_, figure_buff=0.4, dot_radius=0.05, point_label_font_size=30, stroke_width=2
+    dict_, figure_buff=0.4, dot_radius=0.03, point_label_font_size=30, stroke_width=2
 ):
     class MyScene(VoiceoverScene):
         def construct(self):
@@ -115,7 +144,7 @@ def generate_scene(
                 AzureSpeechSynthesizer(
                     voice="en-US-AriaNeural",
                     style="newscast-casual",
-                    global_speed=1.15
+                    global_speed=GLOBAL_SPEED
                     # voice="en-US-BrandonNeural", global_speed=1.15
                 )
             )
@@ -138,9 +167,24 @@ def generate_scene(
                 result[1] *= -1
                 return result
 
+            # Transform all coors
+            for label, coor in dict_["points"].items():
+                dict_["points"][label] = transform_coors(coor + [0])
+
+            for arr in dict_["shapes"]:
+                type_ = arr[0]
+                if type_ == "line":
+                    arr[1] = transform_coors(arr[1] + [0])
+                    arr[2] = transform_coors(arr[2] + [0])
+
+                elif type_ == "polygon":
+                    arr[1] = [transform_coors(i + [0]) for i in arr[1]]
+                else:
+                    raise Exception("Unkown shape type: " + type_)
+
             # Create points
             self.points = {
-                label: Dot(radius=dot_radius).move_to(transform_coors(coor + [0]))
+                label: Dot(radius=dot_radius).set_fill(BASE_DOT_COLOR).move_to(coor)
                 for label, coor in dict_["points"].items()
                 if label in dict_["letters"]
             }
@@ -152,6 +196,7 @@ def generate_scene(
                     font_size=point_label_font_size,
                     weight=manimpango.Weight.HEAVY.name,
                     font="Open Sans",
+                    color=BASE_TEXT_COLOR,
                 )
                 for label, _ in dict_["letters"].items()
             }
@@ -159,6 +204,7 @@ def generate_scene(
             # Transpose labels
             for label, point_label in self.point_labels.items():
                 self.point_labels[label] = point_label.move_to(
+                    # self.points[label].get_center(),
                     transpose_label(
                         self.points[label].get_center(),
                         dict_["letters"][label],
@@ -168,20 +214,18 @@ def generate_scene(
 
             self.static_shapes = []
             for shape in dict_["shapes"]:
-                # type, points
                 type_ = shape[0]
                 if type_ == "line":
                     points = shape[1:]
                     obj = Line(
-                        start=transform_coors(points[0] + [0]),
-                        end=transform_coors(points[1] + [0]),
+                        start=points[0],
+                        end=points[1],
                         stroke_width=stroke_width,
-                    )
+                    ).set_color(BASE_SHAPE_COLOR)
                 elif type_ == "polygon":
                     points = shape[1]
-                    obj = Polygon(
-                        *[transform_coors(i + [0]) for i in points],
-                        stroke_width=stroke_width
+                    obj = Polygon(*points, stroke_width=stroke_width).set_color(
+                        BASE_SHAPE_COLOR
                     )
                 else:
                     raise Exception("Unkown shape type: " + type_)
@@ -206,24 +250,51 @@ def generate_scene(
                 voiceover_txt, bookmarks = reformat_prose(line)
                 if "Prop" in "voiceover_txt":
                     raise Exception()
+
+                # bookmark_elapsed = AUDIO_OFFSET
+
                 print(line)
                 print(">> ", voiceover_txt)
                 with self.voiceover(text=voiceover_txt) as tracker:
                     prev_offset = 0
-                    # import ipdb; ipdb.set_trace()
-                    text = None
+                    text1 = None
+                    text2 = None
+                    self.safe_wait(AUDIO_OFFSET)
+                    elapsed = AUDIO_OFFSET
                     for word_boundary in tracker.data["word_boundaries"]:
+
                         duration = (
                             word_boundary["audio_offset"] - prev_offset
                         ) / 10000000
-                        self.wait(duration)
-                        if text is not None:
-                            self.remove(text)
-                        text = Text(word_boundary["text"])
-                        self.add(text)
+                        self.safe_wait(duration)
+                        elapsed += duration
+
+                        candidate_bookmarks = [
+                            i
+                            for i in bookmarks
+                            if i.text_offset <= word_boundary["text_offset"]
+                        ]
+
+                        if text2 is not None:
+                            self.remove(text2)
+                        text2 = Text(word_boundary["text"]).shift(2 * UL)
+                        self.add(text2)
+
+                        if len(candidate_bookmarks) > 0:
+                            tag = candidate_bookmarks[-1].tag
+
+                            if text1 is not None:
+                                self.remove(text1)
+                            # text1 = Text(candidate_bookmarks[-1].tag).shift(2 * DL)
+                            text1 = get_shape(dict_, tag)
+                            self.add(text1)
+
                         prev_offset = word_boundary["audio_offset"]
-                    self.remove(text)
                 self.wait()
+                if text1 is not None:
+                    self.remove(text1)
+                if text2 is not None:
+                    self.remove(text2)
 
     return MyScene()
 

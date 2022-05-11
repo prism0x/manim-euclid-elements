@@ -4,26 +4,65 @@ from manim_speech import VoiceoverScene
 from manim_speech.interfaces.azure import AzureSpeechSynthesizer
 from math import floor, ceil
 import json
+import manimpango
 
 dict1 = json.loads(open("book-01-proposition-47.json").read())
+
+
+class Bookmark:
+    def __init__(self, tag_count, tag, text_offset):
+        self.tag_count = tag_count
+        self.tag = tag
+        self.text_offset = text_offset
+
+    def __repr__(self):
+        return "<bookmark: %d, tag: %s, text_offset: %s>" % (
+            self.tag_count,
+            self.tag,
+            self.text_offset,
+        )
 
 
 def reformat_prose(prose: str):
     result = re.sub("[^\S\n\t]+\[Prop.*\]\.", ".", prose)
     result = re.sub("\[Prop.*\]", "", result)
     result = (
-        result.replace("{", "")
+        result.replace("{", r'<say-as interpret-as="characters">{')
         .replace(")", "")
         .replace("(", "")
         .replace("]", "")
         .replace("[", "")
-        .replace(" point}", "")
-        .replace(" line}", "")
-        .replace(" angle}", "")
-        .replace(" polygon}", "")
+        .replace(" point}", r" point}</say-as>")
+        .replace(" line}", r" line}</say-as>")
+        .replace(" angle}", r" angle}</say-as>")
+        .replace(" polygon}", r" polygon}</say-as>")
     )
 
-    return result
+    tag_count = 1
+    bookmarks = []
+    tag_replaced = ""
+    offset = 0
+    while offset < len(result):
+        char = result[offset]
+        if char == "{":
+            tag = result[offset + 1 :].split("}")[0]
+            # tag = tag.replace(" ", "-")
+            # tag = "%d-" % (tag_count) + tag
+            bookmarks.append(Bookmark(tag_count, tag, len(tag_replaced)))
+            tag_replaced += tag.split()[0]
+            tag_count += 1
+            offset += len(tag) + 1
+        elif char == "}":
+            offset += 1
+        else:
+            tag_replaced += char
+            offset += 1
+
+    # print(bookmarks)
+    # print(tag_replaced)
+    # import ipdb; ipdb.set_trace()
+
+    return tag_replaced, bookmarks
 
 
 def transpose_label(coor, arr, size):
@@ -68,7 +107,7 @@ def transpose_label(coor, arr, size):
 
 
 def generate_scene(
-    dict_, figure_buff=0.2, dot_radius=0.05, point_label_font_size=30, stroke_width=2
+    dict_, figure_buff=0.4, dot_radius=0.05, point_label_font_size=30, stroke_width=2
 ):
     class MyScene(VoiceoverScene):
         def construct(self):
@@ -103,11 +142,17 @@ def generate_scene(
             self.points = {
                 label: Dot(radius=dot_radius).move_to(transform_coors(coor + [0]))
                 for label, coor in dict_["points"].items()
+                if label in dict_["letters"]
             }
 
             # Create point labels
             self.point_labels = {
-                label: Tex(label, font_size=point_label_font_size)
+                label: Text(
+                    label,
+                    font_size=point_label_font_size,
+                    weight=manimpango.Weight.HEAVY.name,
+                    font="Open Sans",
+                )
                 for label, _ in dict_["letters"].items()
             }
 
@@ -158,21 +203,33 @@ def generate_scene(
             lines = [i for i in lines if i != ""]
 
             for line in lines:
-                voiceover_txt = reformat_prose(line)
+                voiceover_txt, bookmarks = reformat_prose(line)
                 if "Prop" in "voiceover_txt":
                     raise Exception()
                 print(line)
                 print(">> ", voiceover_txt)
-                with self.voiceover(text=voiceover_txt):
-                    pass
-
+                with self.voiceover(text=voiceover_txt) as tracker:
+                    prev_offset = 0
+                    # import ipdb; ipdb.set_trace()
+                    text = None
+                    for word_boundary in tracker.data["word_boundaries"]:
+                        duration = (
+                            word_boundary["audio_offset"] - prev_offset
+                        ) / 10000000
+                        self.wait(duration)
+                        if text is not None:
+                            self.remove(text)
+                        text = Text(word_boundary["text"])
+                        self.add(text)
+                        prev_offset = word_boundary["audio_offset"]
+                    self.remove(text)
                 self.wait()
 
     return MyScene()
 
 
 config["disable_caching"] = True
-config["quality"] = "low_quality"
+# config["quality"] = "low_quality"
 # import ipdb; ipdb.set_trace()
 
 scene1 = generate_scene(dict1)

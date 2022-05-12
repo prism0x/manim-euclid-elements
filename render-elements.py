@@ -7,8 +7,8 @@ from math import floor, ceil
 import json
 import manimpango
 
-dict1 = json.loads(open("book-01-proposition-47-short.json").read())
-# dict1 = json.loads(open("book-01-proposition-47.json").read())
+# dict1 = json.loads(open("book-01-proposition-47-short.json").read())
+dict1 = json.loads(open("book-01-proposition-47.json").read())
 
 # GLOBAL_SPEED = 1.15
 # AUDIO_OFFSET = 0.0
@@ -123,7 +123,10 @@ def transpose_label(coor, arr, size):
 def get_shape(dict_, tag: str):
     letters, type_ = tag.split(" ")
 
-    if type_ == "line":
+    if type_ == "point":
+        point = dict_["points"][letters[0]]
+        return Dot(point).set_fill(HIGHLIGHT_COLOR)
+    elif type_ == "line":
         points = [dict_["points"][i] for i in letters]
         return Line(start=points[0], end=points[1]).set_color(HIGHLIGHT_COLOR)
     elif type_ == "polygon":
@@ -131,6 +134,12 @@ def get_shape(dict_, tag: str):
             letters = dict_["polygonl"][letters]
         points = [dict_["points"][i] for i in letters]
         return Polygon(*points).set_color(HIGHLIGHT_COLOR)
+    elif type_ == "angle":
+        points = [dict_["points"][i] for i in letters]
+        return VGroup(
+            Line(start=points[0], end=points[1]).set_color(HIGHLIGHT_COLOR),
+            Line(start=points[1], end=points[2]).set_color(HIGHLIGHT_COLOR),
+        )
     else:
         raise Exception(type_)
 

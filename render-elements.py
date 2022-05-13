@@ -1,3 +1,4 @@
+from copy import deepcopy
 from curses.ascii import DEL
 import re
 from manim import *
@@ -14,7 +15,7 @@ dict1 = json.loads(open("book-01-proposition-47.json").read())
 # AUDIO_OFFSET = 0.0
 
 GLOBAL_SPEED = 1
-AUDIO_OFFSET = 0.1
+AUDIO_OFFSET = 0.0
 BASE_SHAPE_COLOR = GRAY_D
 BASE_DOT_COLOR = GRAY_C
 BASE_TEXT_COLOR = GRAY_C
@@ -33,6 +34,32 @@ class Bookmark:
             self.tag_count,
             self.tag,
             self.text_offset,
+        )
+
+    def label_length(self):
+        return len(self.tag.split()[0])
+
+
+class Section:
+    def __init__(
+        self, text, duration, text_offset, appearing_shapes, disappearing_shapes
+    ):
+        self.duration = duration
+        self.text = text
+        self.text_offset = text_offset
+        self.appearing_shapes = appearing_shapes
+        self.disappearing_shapes = disappearing_shapes
+
+    def __repr__(self):
+        return (
+            "<section: %s, duration: %.3f, text_offset: %d, appearing: %s, disappearing: %s>"
+            % (
+                self.text,
+                self.duration,
+                self.text_offset,
+                str(self.appearing_shapes),
+                str(self.disappearing_shapes),
+            )
         )
 
 
@@ -61,8 +88,9 @@ def reformat_prose(prose: str):
             tag = result[offset + 1 :].split("}")[0]
             # tag = tag.replace(" ", "-")
             # tag = "%d-" % (tag_count) + tag
+            letters = tag.split()[0]
             bookmarks.append(Bookmark(tag_count, tag, len(tag_replaced)))
-            tag_replaced += tag.split()[0]
+            tag_replaced += letters
             tag_count += 1
             offset += len(tag) + 1
         elif char == "}":
@@ -120,26 +148,65 @@ def transpose_label(coor, arr, size):
     return np.array(coor + [0]) + transform_
 
 
-def get_shape(dict_, tag: str):
+colors = [
+    BLUE_B,
+    TEAL_B,
+    GREEN_B,
+    YELLOW_B,
+    GOLD_B,
+    RED_B,
+    MAROON_B,
+    PURPLE_B,
+]
+current_color_count = 0
+# import ipdb; ipdb.set_trace()
+
+
+def get_shape_animations(dict_, tag: str):
+    global current_color_count
     letters, type_ = tag.split(" ")
+    current_color = colors[current_color_count % len(colors)]
+    current_color_count += 1
 
     if type_ == "point":
         point = dict_["points"][letters[0]]
-        return Dot(point).set_fill(HIGHLIGHT_COLOR)
+        obj = Dot(point).set_fill(current_color)
+        return Write(obj), FadeOut(obj)
     elif type_ == "line":
         points = [dict_["points"][i] for i in letters]
-        return Line(start=points[0], end=points[1]).set_color(HIGHLIGHT_COLOR)
+        obj = Line(start=points[0], end=points[1]).set_color(current_color)
+        return Write(obj), FadeOut(obj)
     elif type_ == "polygon":
         if letters in dict_["polygonl"]:
             letters = dict_["polygonl"][letters]
         points = [dict_["points"][i] for i in letters]
-        return Polygon(*points).set_color(HIGHLIGHT_COLOR)
+        obj = (
+            Polygon(*points)
+            .set_color(current_color)
+            .set_fill(current_color, opacity=0.75)
+        )
+        return Write(obj), FadeOut(obj)
     elif type_ == "angle":
         points = [dict_["points"][i] for i in letters]
-        return VGroup(
-            Line(start=points[0], end=points[1]).set_color(HIGHLIGHT_COLOR),
-            Line(start=points[1], end=points[2]).set_color(HIGHLIGHT_COLOR),
+        intersectee = (
+            Polygon(*points)
+            .set_color(current_color)
+            .set_fill(current_color, opacity=0.75)
         )
+        circle = Circle(
+            radius=min(intersectee.width, intersectee.height) * 0.2
+        ).move_to(points[1])
+
+        obj = (
+            Intersection(circle, intersectee)
+            .set_color(current_color)
+            .set_fill(current_color, opacity=0.75)
+        )
+        # obj = VGroup(
+        #     Line(start=points[0], end=points[1]).set_color(current_color),
+        #     Line(start=points[1], end=points[2]).set_color(current_color),
+        # )
+        return Write(obj), FadeOut(obj)
     else:
         raise Exception(type_)
 
@@ -264,44 +331,133 @@ def generate_scene(
 
                 print(line)
                 print(">> ", voiceover_txt)
+
                 with self.voiceover(text=voiceover_txt) as tracker:
                     prev_offset = 0
-                    text1 = None
                     text2 = None
                     self.safe_wait(AUDIO_OFFSET)
-                    elapsed = AUDIO_OFFSET
-                    for word_boundary in tracker.data["word_boundaries"]:
+                    anim_in = None
+                    prev_anim_out = None
 
-                        duration = (
-                            word_boundary["audio_offset"] - prev_offset
+                    word_boundaries = deepcopy(tracker.data["word_boundaries"])
+                    # prev_text_offset = 0
+                    # elapsed = AUDIO_OFFSET
+                    # audio_offset_arr = []
+                    # text_offset_arr = []
+                    # word_arr = []
+
+                    current_text_offset = 0
+                    current_audio_offset = 0
+                    current_word = ""
+                    bookmark_remaining = -1
+
+                    bookmarks_dict = {}
+                    sections = []
+
+                    for b in bookmarks:
+                        bookmarks_dict[b.text_offset] = b
+                    last_text_offset = 0
+                    current_bookmark = None
+                    prev_bookmark = None
+                    while len(word_boundaries) > 0:
+                        wb = word_boundaries.pop(0)
+
+                        if wb["text_offset"] in bookmarks_dict:
+                            current_bookmark = bookmarks_dict[wb["text_offset"]]
+                            bookmark_remaining = current_bookmark.label_length()
+                            last_text_offset = wb["text_offset"]
+
+                        current_audio_offset += (
+                            wb["audio_offset"] - prev_offset
                         ) / 10000000
-                        self.safe_wait(duration)
-                        elapsed += duration
 
-                        candidate_bookmarks = [
-                            i
-                            for i in bookmarks
-                            if i.text_offset <= word_boundary["text_offset"]
-                        ]
+                        current_text_offset = wb["text_offset"]
+                        current_word += wb["text"]
+                        print(
+                            wb["text_offset"], bookmark_remaining, current_text_offset
+                        )
+
+                        if (
+                            bookmark_remaining
+                            - (current_text_offset - last_text_offset + 1)
+                            <= 0
+                        ):
+                            current_tag = []
+                            prev_tag = []
+                            if (
+                                current_bookmark is not None
+                                and prev_bookmark is not None
+                            ):
+                                prev_tag = [prev_bookmark.tag]
+
+                            if current_bookmark is not None:
+                                current_tag = [current_bookmark.tag]
+                                prev_bookmark = current_bookmark
+                                current_bookmark = None
+
+                            print(current_bookmark, prev_bookmark)
+                            sections.append(
+                                Section(
+                                    current_word,
+                                    current_audio_offset,
+                                    current_text_offset,
+                                    current_tag,
+                                    prev_tag,
+                                )
+                            )
+                            # audio_offset_arr.append(current_audio_offset)
+                            # text_offset_arr.append(current_text_offset)
+                            # word_arr.append(current_word)
+
+                            bookmark_remaining = 0
+                            current_text_offset = 0
+                            current_audio_offset = 0
+                            current_word = ""
+
+                        # bookmark_remaining -= 1
+
+                        prev_offset = wb["audio_offset"]
+                        # prev_text_offset = wb["text_offset"]
+
+                    audio_offset_arr = [AUDIO_OFFSET + i for i in audio_offset_arr]
+
+                    for i in range(len(sections) - 1):
+                        if (
+                            sections[i + 1].appearing_shapes != []
+                            and sections[i + 1].disappearing_shapes != []
+                        ):
+                            sections[i].disappearing_shapes.extend(
+                                sections[i + 1].disappearing_shapes
+                            )
+                            sections[i + 1].disappearing_shapes = []
+
+                    # import ipdb; ipdb.set_trace()
+                    for s in sections:
+
+                        if len(s.appearing_shapes) == 0:
+                            self.safe_wait(s.duration)
+                        else:
+                            anim_in, anim_out = get_shape_animations(
+                                dict_, s.appearing_shapes[0]
+                            )
+
+                            if prev_anim_out is None:
+                                self.play(anim_in, run_time=s.duration)
+                            else:
+                                self.play(anim_in, prev_anim_out, run_time=s.duration)
+                                prev_anim_out = None
+                            prev_anim_out = anim_out
 
                         if text2 is not None:
                             self.remove(text2)
-                        text2 = Text(word_boundary["text"]).shift(2 * UL)
+                        text2 = Text(s.text).shift(3.3 * DOWN)
                         self.add(text2)
 
-                        if len(candidate_bookmarks) > 0:
-                            tag = candidate_bookmarks[-1].tag
+                    if prev_anim_out is not None:
+                        self.play(prev_anim_out)
+                    self.wait()
 
-                            if text1 is not None:
-                                self.remove(text1)
-                            # text1 = Text(candidate_bookmarks[-1].tag).shift(2 * DL)
-                            text1 = get_shape(dict_, tag)
-                            self.add(text1)
 
-                        prev_offset = word_boundary["audio_offset"]
-                self.wait()
-                if text1 is not None:
-                    self.remove(text1)
                 if text2 is not None:
                     self.remove(text2)
 

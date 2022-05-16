@@ -174,7 +174,7 @@ def get_angle(p1, p2, p3):
     return angle
 
 
-def get_shape_animations(dict_, tag: str):
+def get_shape_animations(dict_, tag: str, point_labels):
     global current_color_count
     letters, type_ = tag.split(" ")
     current_color = colors[current_color_count % len(colors)]
@@ -183,11 +183,11 @@ def get_shape_animations(dict_, tag: str):
     if type_ == "point":
         point = dict_["points"][letters[0]]
         obj = Dot(point).set_fill(current_color)
-        return Write(obj), FadeOut(obj)
+        # return Write(obj), FadeOut(obj)
     elif type_ == "line":
         points = [dict_["points"][i] for i in letters]
         obj = Line(start=points[0], end=points[1]).set_color(current_color)
-        return Write(obj), FadeOut(obj)
+        # return Write(obj), FadeOut(obj)
     elif type_ == "polygon":
         if letters in dict_["polygonl"]:
             letters = dict_["polygonl"][letters]
@@ -197,7 +197,7 @@ def get_shape_animations(dict_, tag: str):
             .set_color(current_color)
             .set_fill(current_color, opacity=0.75)
         )
-        return Write(obj), FadeOut(obj)
+        # return Write(obj), FadeOut(obj)
     elif type_ == "angle":
         points = [dict_["points"][i] for i in letters]
         angle = get_angle(*points)
@@ -238,9 +238,23 @@ def get_shape_animations(dict_, tag: str):
             #     Line(start=points[1], end=points[2]).set_color(current_color),
             # )
         obj = VGroup(VGroup(line1, line2), angle_obj)
-        return Write(obj), FadeOut(obj)
+        # return Write(obj), FadeOut(obj)
     else:
         raise Exception(type_)
+    # import ipdb; ipdb.set_trace()
+    copy_letters = [
+        point_labels[l].copy().set_fill(current_color)
+        for l in letters
+        if l in point_labels
+    ]
+    letters_highlight = AnimationGroup(*[FadeIn(i) for i in copy_letters], lag_ratio=1)
+    letters_unhighlight = AnimationGroup(
+        *[FadeOut(i) for i in copy_letters],
+    )
+    anim_in = AnimationGroup(Write(obj), letters_highlight)
+    anim_out = AnimationGroup(FadeOut(obj), letters_unhighlight)
+
+    return anim_in, anim_out
 
 
 def generate_scene(
@@ -470,13 +484,14 @@ def generate_scene(
                             self.safe_wait(s.duration)
                         else:
                             anim_in, anim_out = get_shape_animations(
-                                dict_, s.appearing_shapes[0]
+                                dict_, s.appearing_shapes[0], self.point_labels
                             )
 
                             if prev_anim_out is None:
                                 self.play(anim_in, run_time=s.duration)
                             else:
-                                self.play(anim_in, prev_anim_out, run_time=s.duration)
+                                # import ipdb; ipdb.set_trace()
+                                self.play(prev_anim_out, anim_in, run_time=s.duration)
                                 prev_anim_out = None
                             prev_anim_out = anim_out
 
@@ -496,7 +511,7 @@ def generate_scene(
 
 
 config["disable_caching"] = True
-config["quality"] = "low_quality"
+# config["quality"] = "low_quality"
 # import ipdb; ipdb.set_trace()
 
 scene1 = generate_scene(dict1)

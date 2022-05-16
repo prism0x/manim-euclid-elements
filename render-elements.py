@@ -7,6 +7,7 @@ from manim_speech.interfaces.azure import AzureSpeechSynthesizer
 from math import floor, ceil
 import json
 import manimpango
+from numpy import poly
 
 # dict1 = json.loads(open("book-01-proposition-47-short.json").read())
 dict1 = json.loads(open("book-01-proposition-47.json").read())
@@ -150,16 +151,27 @@ def transpose_label(coor, arr, size):
 
 colors = [
     BLUE_B,
-    TEAL_B,
-    GREEN_B,
+    # TEAL_B,
+    # GREEN_B,
     YELLOW_B,
-    GOLD_B,
-    RED_B,
+    # GOLD_B,
+    # RED_B,
     MAROON_B,
-    PURPLE_B,
+    # PURPLE_B,
 ]
 current_color_count = 0
 # import ipdb; ipdb.set_trace()
+
+
+def get_angle(p1, p2, p3):
+    v1 = p1 - p2
+    v2 = p3 - p2
+
+    unit_v1 = v1 / np.linalg.norm(v1)
+    unit_v2 = v2 / np.linalg.norm(v2)
+    dot_product = np.dot(unit_v1, unit_v2)
+    angle = np.arccos(dot_product)
+    return angle
 
 
 def get_shape_animations(dict_, tag: str):
@@ -188,24 +200,44 @@ def get_shape_animations(dict_, tag: str):
         return Write(obj), FadeOut(obj)
     elif type_ == "angle":
         points = [dict_["points"][i] for i in letters]
-        intersectee = (
-            Polygon(*points)
-            .set_color(current_color)
-            .set_fill(current_color, opacity=0.75)
-        )
-        circle = Circle(
-            radius=min(intersectee.width, intersectee.height) * 0.2
-        ).move_to(points[1])
+        angle = get_angle(*points)
+        v1 = points[2] - points[1]
+        v2 = points[0] - points[1]
 
-        obj = (
-            Intersection(circle, intersectee)
-            .set_color(current_color)
-            .set_fill(current_color, opacity=0.75)
-        )
-        # obj = VGroup(
-        #     Line(start=points[0], end=points[1]).set_color(current_color),
-        #     Line(start=points[1], end=points[2]).set_color(current_color),
-        # )
+        radius = min(np.linalg.norm(v1), np.linalg.norm(v2)) * 0.2
+        points = [dict_["points"][i] for i in letters]
+        line1 = Line(start=points[0], end=points[1]).set_color(current_color)
+        line2 = Line(start=points[1], end=points[2]).set_color(current_color)
+
+        if abs(angle - np.pi / 2) < 1e-9:
+            p1 = points[1]
+            v1_ = radius / np.linalg.norm(v1) * v1
+            v2_ = radius / np.linalg.norm(v2) * v2
+
+            polygon_points = [p1, p1 + v1_, p1 + v1_ + v2_, p1 + v2_]
+            angle_obj = (
+                Polygon(*polygon_points)
+                .set_color(current_color)
+                .set_fill(current_color, opacity=0.75)
+            )
+        else:
+            intersectee = (
+                Polygon(*points)
+                .set_color(current_color)
+                .set_fill(current_color, opacity=0.75)
+            )
+            circle = Circle(radius=radius).move_to(points[1])
+
+            angle_obj = (
+                Intersection(circle, intersectee)
+                .set_color(current_color)
+                .set_fill(current_color, opacity=0.75)
+            )
+            # obj = VGroup(
+            #     Line(start=points[0], end=points[1]).set_color(current_color),
+            #     Line(start=points[1], end=points[2]).set_color(current_color),
+            # )
+        obj = VGroup(VGroup(line1, line2), angle_obj)
         return Write(obj), FadeOut(obj)
     else:
         raise Exception(type_)
@@ -373,9 +405,9 @@ def generate_scene(
 
                         current_text_offset = wb["text_offset"]
                         current_word += wb["text"]
-                        print(
-                            wb["text_offset"], bookmark_remaining, current_text_offset
-                        )
+                        # print(
+                        #     wb["text_offset"], bookmark_remaining, current_text_offset
+                        # )
 
                         if (
                             bookmark_remaining
@@ -395,7 +427,7 @@ def generate_scene(
                                 prev_bookmark = current_bookmark
                                 current_bookmark = None
 
-                            print(current_bookmark, prev_bookmark)
+                            # print(current_bookmark, prev_bookmark)
                             sections.append(
                                 Section(
                                     current_word,
@@ -419,7 +451,7 @@ def generate_scene(
                         prev_offset = wb["audio_offset"]
                         # prev_text_offset = wb["text_offset"]
 
-                    audio_offset_arr = [AUDIO_OFFSET + i for i in audio_offset_arr]
+                    # audio_offset_arr = [AUDIO_OFFSET + i for i in audio_offset_arr]
 
                     for i in range(len(sections) - 1):
                         if (
@@ -457,7 +489,6 @@ def generate_scene(
                         self.play(prev_anim_out)
                     self.wait()
 
-
                 if text2 is not None:
                     self.remove(text2)
 
@@ -465,7 +496,7 @@ def generate_scene(
 
 
 config["disable_caching"] = True
-# config["quality"] = "low_quality"
+config["quality"] = "low_quality"
 # import ipdb; ipdb.set_trace()
 
 scene1 = generate_scene(dict1)

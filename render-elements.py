@@ -10,7 +10,7 @@ import manimpango
 from numpy import poly
 
 # dict1 = json.loads(open("book-01-proposition-47-short.json").read())
-dict1 = json.loads(open("book-01-proposition-47.json").read())
+# dict1 = json.loads(open("book-01-proposition-47.json").read())
 
 # GLOBAL_SPEED = 1.15
 # AUDIO_OFFSET = 0.0
@@ -38,7 +38,13 @@ class Bookmark:
         )
 
     def label_length(self):
-        return len(self.tag.split()[0])
+        tokens = self.tag.split()
+        type_ = tokens[0]
+
+        if type_ == "circle:":
+            return len(tokens[2])
+        else:
+            return len(tokens[1])
 
 
 class Section:
@@ -65,33 +71,47 @@ class Section:
 
 
 def reformat_prose(prose: str):
+    def get_letters_from_tag(tag: str):
+        tokens = tag.split(" ")
+        type_ = tokens[0]
+        if type_ == "circle":
+            return tokens[2]
+        else:
+            return tokens[1]
+
     result = re.sub("[^\S\n\t]+\[Prop.*\]\.", ".", prose)
     result = re.sub("\[Prop.*\]", "", result)
     result = (
-        result.replace("{", r'<say-as interpret-as="characters">{')
-        .replace(")", "")
+        result.replace(")", "")
         .replace("(", "")
         .replace("]", "")
         .replace("[", "")
-        .replace(" point}", r" point}</say-as>")
-        .replace(" line}", r" line}</say-as>")
-        .replace(" angle}", r" angle}</say-as>")
-        .replace(" polygon}", r" polygon}</say-as>")
+        .replace("{", r'<say-as interpret-as="characters">{')
+        .replace("}", r"}</say-as>")
+        # .replace("{", r'<say-as interpret-as="characters">{')
+        # .replace(" point}", r" point}</say-as>")
+        # .replace(" line}", r" line}</say-as>")
+        # .replace(" angle}", r" angle}</say-as>")
+        # .replace(" polygon}", r" polygon}</say-as>")
     )
 
     tag_count = 1
     bookmarks = []
     tag_replaced = ""
     offset = 0
+    # extra_char_count = 0
     while offset < len(result):
         char = result[offset]
         if char == "{":
             tag = result[offset + 1 :].split("}")[0]
             # tag = tag.replace(" ", "-")
             # tag = "%d-" % (tag_count) + tag
-            letters = tag.split()[0]
+            letters = get_letters_from_tag(tag)
+            # bookmarks.append(Bookmark(tag_count, tag, len(tag_replaced)-extra_char_count))
+            # tag_replaced += '<say-as interpret-as="characters">' + letters + "</say-as>"
             bookmarks.append(Bookmark(tag_count, tag, len(tag_replaced)))
             tag_replaced += letters
+            # extra_char_count += len('<say-as interpret-as="characters">'+"</say-as>")
             tag_count += 1
             offset += len(tag) + 1
         elif char == "}":
@@ -102,7 +122,6 @@ def reformat_prose(prose: str):
 
     # print(bookmarks)
     # print(tag_replaced)
-    # import ipdb; ipdb.set_trace()
 
     return tag_replaced, bookmarks
 
@@ -139,7 +158,11 @@ def transpose_label(coor, arr, size):
         return np.array(transform_ + [0])
 
     if isinstance(mode, float):
-        transform_ = (proj(ceil(mode), l) + proj(floor(mode), l)) / 2
+        # transform_ = (proj(ceil(mode), l) + proj(floor(mode), l)) / 2
+        a = proj(ceil(mode), l)
+        b = proj(floor(mode), l)
+        t = mode - floor(mode)
+        transform_ = b + (a - b) * t
     else:
         transform_ = proj(mode, l)
 
@@ -160,7 +183,6 @@ colors = [
     # PURPLE_B,
 ]
 current_color_count = 0
-# import ipdb; ipdb.set_trace()
 
 
 def get_angle(p1, p2, p3):
@@ -176,18 +198,19 @@ def get_angle(p1, p2, p3):
 
 def get_shape_animations(dict_, tag: str, point_labels):
     global current_color_count
-    letters, type_ = tag.split(" ")
+    # letters, type_ = tag.split(" ")
+    tokens = tag.split(" ")
+    type_ = tokens[0]
+    letters = tokens[1]
     current_color = colors[current_color_count % len(colors)]
     current_color_count += 1
 
     if type_ == "point":
         point = dict_["points"][letters[0]]
         obj = Dot(point).set_fill(current_color)
-        # return Write(obj), FadeOut(obj)
     elif type_ == "line":
         points = [dict_["points"][i] for i in letters]
         obj = Line(start=points[0], end=points[1]).set_color(current_color)
-        # return Write(obj), FadeOut(obj)
     elif type_ == "polygon":
         if letters in dict_["polygonl"]:
             letters = dict_["polygonl"][letters]
@@ -197,7 +220,6 @@ def get_shape_animations(dict_, tag: str, point_labels):
             .set_color(current_color)
             .set_fill(current_color, opacity=0.75)
         )
-        # return Write(obj), FadeOut(obj)
     elif type_ == "angle":
         points = [dict_["points"][i] for i in letters]
         angle = get_angle(*points)
@@ -239,9 +261,22 @@ def get_shape_animations(dict_, tag: str, point_labels):
             # )
         obj = VGroup(VGroup(line1, line2), angle_obj)
         # return Write(obj), FadeOut(obj)
+    elif type_ == "circle":
+        # if letters in dict_["polygonl"]:
+        #     letters = dict_["polygonl"][letters]
+        letters = tokens[2]
+        points = [dict_["points"][i] for i in letters]
+        center = dict_["points"][tokens[1]]
+        radius = np.linalg.norm(center - points[0])
+        obj = (
+            Circle(radius=radius)
+            .move_to(center)
+            .set_color(current_color)
+            .set_fill(current_color, opacity=0.75)
+        )
     else:
         raise Exception(type_)
-    # import ipdb; ipdb.set_trace()
+
     copy_letters = [
         point_labels[l].copy().set_fill(current_color)
         for l in letters
@@ -258,7 +293,12 @@ def get_shape_animations(dict_, tag: str, point_labels):
 
 
 def generate_scene(
-    dict_, figure_buff=0.4, dot_radius=0.03, point_label_font_size=30, stroke_width=2
+    dict_,
+    figure_buff=0.4,
+    dot_radius=0.03,
+    point_label_font_size=30,
+    stroke_width=2,
+    name=None,
 ):
     class MyScene(VoiceoverScene):
         def construct(self):
@@ -298,9 +338,15 @@ def generate_scene(
                 if type_ == "line":
                     arr[1] = transform_coors(arr[1] + [0])
                     arr[2] = transform_coors(arr[2] + [0])
-
                 elif type_ == "polygon":
                     arr[1] = [transform_coors(i + [0]) for i in arr[1]]
+                elif type_ == "circle":
+                    arr[1] = transform_coors(arr[1] + [0])
+                    arr[2] *= coors_scale
+                elif type_ == "arc":
+                    arr[1] = transform_coors(arr[1] + [0])
+                    arr[2] = transform_coors(arr[2] + [0])
+                    arr[3] = transform_coors(arr[3] + [0])
                 else:
                     raise Exception("Unkown shape type: " + type_)
 
@@ -349,6 +395,26 @@ def generate_scene(
                     obj = Polygon(*points, stroke_width=stroke_width).set_color(
                         BASE_SHAPE_COLOR
                     )
+                elif type_ == "circle":
+                    center = shape[1]
+                    radius = shape[2] / 2
+                    obj = (
+                        Circle(radius, stroke_width=stroke_width)
+                        .move_to(center)
+                        .set_color(BASE_SHAPE_COLOR)
+                    )
+                elif type_ == "arc":
+                    center = shape[1]
+                    to = shape[2]
+                    from_ = shape[3]
+                    radius = np.linalg.norm(from_ - center)
+                    obj = ArcBetweenPoints(
+                        start=from_,
+                        end=to,
+                        radius=radius,
+                        stroke_width=stroke_width,
+                    ).set_color(BASE_SHAPE_COLOR)
+
                 else:
                     raise Exception("Unkown shape type: " + type_)
                 self.static_shapes.append(obj)
@@ -368,12 +434,12 @@ def generate_scene(
             lines = prose.split("\n")
             lines = [i for i in lines if i != ""]
 
+            self.wait(0.5)
+
             for line in lines:
                 voiceover_txt, bookmarks = reformat_prose(line)
                 if "Prop" in "voiceover_txt":
                     raise Exception()
-
-                # bookmark_elapsed = AUDIO_OFFSET
 
                 print(line)
                 print(">> ", voiceover_txt)
@@ -386,11 +452,6 @@ def generate_scene(
                     prev_anim_out = None
 
                     word_boundaries = deepcopy(tracker.data["word_boundaries"])
-                    # prev_text_offset = 0
-                    # elapsed = AUDIO_OFFSET
-                    # audio_offset_arr = []
-                    # text_offset_arr = []
-                    # word_arr = []
 
                     current_text_offset = 0
                     current_audio_offset = 0
@@ -405,6 +466,7 @@ def generate_scene(
                     last_text_offset = 0
                     current_bookmark = None
                     prev_bookmark = None
+
                     while len(word_boundaries) > 0:
                         wb = word_boundaries.pop(0)
 
@@ -477,9 +539,7 @@ def generate_scene(
                             )
                             sections[i + 1].disappearing_shapes = []
 
-                    # import ipdb; ipdb.set_trace()
                     for s in sections:
-
                         if len(s.appearing_shapes) == 0:
                             self.safe_wait(s.duration)
                         else:
@@ -490,7 +550,6 @@ def generate_scene(
                             if prev_anim_out is None:
                                 self.play(anim_in, run_time=s.duration)
                             else:
-                                # import ipdb; ipdb.set_trace()
                                 self.play(prev_anim_out, anim_in, run_time=s.duration)
                                 prev_anim_out = None
                             prev_anim_out = anim_out
@@ -507,12 +566,18 @@ def generate_scene(
                 if text2 is not None:
                     self.remove(text2)
 
+    if name is not None:
+        MyScene.__name__ = name
     return MyScene()
 
 
 config["disable_caching"] = True
-# config["quality"] = "low_quality"
+config["quality"] = "low_quality"
 # import ipdb; ipdb.set_trace()
 
-scene1 = generate_scene(dict1)
+scene1 = generate_scene(
+    # json.loads(open("book-01-proposition-47.json").read()), name="B01P47"
+    json.loads(open("book-03-proposition-02.json").read()),
+    name="B03P02",
+)
 scene1.render()

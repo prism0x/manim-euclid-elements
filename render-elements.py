@@ -7,6 +7,7 @@ from manim_speech.interfaces.azure import AzureSpeechSynthesizer
 from math import floor, ceil
 import json
 import manimpango
+from matplotlib.pyplot import figure
 from numpy import poly
 
 # dict1 = json.loads(open("book-01-proposition-47-short.json").read())
@@ -88,11 +89,6 @@ def reformat_prose(prose: str):
         .replace("[", "")
         .replace("{", r'<say-as interpret-as="characters">{')
         .replace("}", r"}</say-as>")
-        # .replace("{", r'<say-as interpret-as="characters">{')
-        # .replace(" point}", r" point}</say-as>")
-        # .replace(" line}", r" line}</say-as>")
-        # .replace(" angle}", r" angle}</say-as>")
-        # .replace(" polygon}", r" polygon}</say-as>")
     )
 
     tag_count = 1
@@ -104,8 +100,6 @@ def reformat_prose(prose: str):
         char = result[offset]
         if char == "{":
             tag = result[offset + 1 :].split("}")[0]
-            # tag = tag.replace(" ", "-")
-            # tag = "%d-" % (tag_count) + tag
             letters = get_letters_from_tag(tag)
             # bookmarks.append(Bookmark(tag_count, tag, len(tag_replaced)-extra_char_count))
             # tag_replaced += '<say-as interpret-as="characters">' + letters + "</say-as>"
@@ -206,76 +200,36 @@ def get_shape_animations(dict_, tag: str, point_labels):
     current_color_count += 1
 
     if type_ == "point":
-        point = dict_["points"][letters[0]]
-        obj = Dot(point).set_fill(current_color)
+        points = [dict_["points"][letters[0]]]
     elif type_ == "line":
         points = [dict_["points"][i] for i in letters]
-        obj = Line(start=points[0], end=points[1]).set_color(current_color)
     elif type_ == "polygon":
         if letters in dict_["polygonl"]:
             letters = dict_["polygonl"][letters]
-        points = [dict_["points"][i] for i in letters]
-        obj = (
-            Polygon(*points)
-            .set_color(current_color)
-            .set_fill(current_color, opacity=0.75)
-        )
+        points = [[dict_["points"][i] for i in letters]]
+        # obj = (
+        #     Polygon(*points)
+        #     .set_color(current_color)
+        #     .set_fill(current_color, opacity=opacity)
+        # )
     elif type_ == "angle":
         points = [dict_["points"][i] for i in letters]
-        angle = get_angle(*points)
-        v1 = points[2] - points[1]
-        v2 = points[0] - points[1]
 
-        radius = min(np.linalg.norm(v1), np.linalg.norm(v2)) * 0.2
-        points = [dict_["points"][i] for i in letters]
-        line1 = Line(start=points[0], end=points[1]).set_color(current_color)
-        line2 = Line(start=points[1], end=points[2]).set_color(current_color)
-
-        if abs(angle - np.pi / 2) < 1e-9:
-            p1 = points[1]
-            v1_ = radius / np.linalg.norm(v1) * v1
-            v2_ = radius / np.linalg.norm(v2) * v2
-
-            polygon_points = [p1, p1 + v1_, p1 + v1_ + v2_, p1 + v2_]
-            angle_obj = (
-                Polygon(*polygon_points)
-                .set_color(current_color)
-                .set_fill(current_color, opacity=0.75)
-            )
-        else:
-            intersectee = (
-                Polygon(*points)
-                .set_color(current_color)
-                .set_fill(current_color, opacity=0.75)
-            )
-            circle = Circle(radius=radius).move_to(points[1])
-
-            angle_obj = (
-                Intersection(circle, intersectee)
-                .set_color(current_color)
-                .set_fill(current_color, opacity=0.75)
-            )
-            # obj = VGroup(
-            #     Line(start=points[0], end=points[1]).set_color(current_color),
-            #     Line(start=points[1], end=points[2]).set_color(current_color),
-            # )
-        obj = VGroup(VGroup(line1, line2), angle_obj)
-        # return Write(obj), FadeOut(obj)
     elif type_ == "circle":
-        # if letters in dict_["polygonl"]:
-        #     letters = dict_["polygonl"][letters]
-        letters = tokens[2]
-        points = [dict_["points"][i] for i in letters]
+        points = [dict_["points"][i] for i in tokens[2]]
         center = dict_["points"][tokens[1]]
-        radius = np.linalg.norm(center - points[0])
-        obj = (
-            Circle(radius=radius)
-            .move_to(center)
-            .set_color(current_color)
-            .set_fill(current_color, opacity=0.75)
-        )
+        diameter = 2 * np.linalg.norm(center - points[0])
+        points = [center, diameter]
     else:
         raise Exception(type_)
+
+    shape = [
+        type_,
+    ] + points
+
+    obj = create_shape(
+        shape, stroke_width=4, stroke_color=current_color, fill_color=current_color
+    )
 
     copy_letters = [
         point_labels[l].copy().set_fill(current_color)
@@ -290,6 +244,150 @@ def get_shape_animations(dict_, tag: str, point_labels):
     anim_out = AnimationGroup(FadeOut(obj), letters_unhighlight)
 
     return anim_in, anim_out
+
+
+def preprocess_input_dict(dict_, figure_buff):
+    x_coors = [coor[0] for _, coor in dict_["points"].items()]
+    y_coors = [coor[1] for _, coor in dict_["points"].items()]
+
+    xmin = min(x_coors)
+    xmax = max(x_coors)
+    ymin = min(y_coors)
+    ymax = max(y_coors)
+    xscale = (1 - figure_buff) * config["frame_width"] / (xmax - xmin)
+    yscale = (1 - figure_buff) * config["frame_height"] / (ymax - ymin)
+    coors_center = np.array(((xmax + xmin) / 2, (ymax + ymin) / 2, 0.0))
+    coors_scale = min(xscale, yscale)
+
+    def transform_coors(coor):
+        if not isinstance(coor, np.ndarray):
+            coor = np.array(coor)
+        result = coors_scale * (coor - coors_center)
+        result[1] *= -1
+        return result
+
+    def transform_shape_coors(arr):
+        type_ = arr[0]
+        if type_ == "line":
+            arr[1] = transform_coors(arr[1] + [0])
+            arr[2] = transform_coors(arr[2] + [0])
+        elif type_ == "polygon":
+            arr[1] = [transform_coors(i + [0]) for i in arr[1]]
+        elif type_ == "circle":
+            arr[1] = transform_coors(arr[1] + [0])
+            arr[2] *= coors_scale
+        elif type_ == "arc" or type_ == "anglecurve":
+            arr[1] = transform_coors(arr[1] + [0])
+            arr[2] = transform_coors(arr[2] + [0])
+            arr[3] = transform_coors(arr[3] + [0])
+        else:
+            raise Exception("Unkown shape type: " + type_)
+
+    # Transform all coors
+    for label, coor in dict_["points"].items():
+        dict_["points"][label] = transform_coors(coor + [0])
+
+    for arr in dict_["shapes"]:
+        transform_shape_coors(arr)
+
+    if "given" in dict_:
+        for _, arrs in dict_["given"].items():
+            for arr in arrs:
+                transform_shape_coors(arr)
+
+
+def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_color=None):
+    if fill_color == None:
+        opacity = 0
+    else:
+        opacity = 0.75
+    type_ = shape[0]
+    if type_ == "line":
+        points = shape[1:]
+        obj = Line(
+            start=points[0],
+            end=points[1],
+            stroke_width=stroke_width,
+        ).set_color(stroke_color)
+    elif type_ == "point":
+        point = shape[1]
+        obj = Dot(point).set_fill(fill_color)
+    elif type_ == "polygon":
+        points = shape[1]
+        obj = (
+            Polygon(*points, stroke_width=stroke_width)
+            .set_color(stroke_color)
+            .set_fill(fill_color, opacity=opacity)
+        )
+    elif type_ == "circle":
+        center = shape[1]
+        radius = shape[2] / 2
+        obj = (
+            Circle(radius, stroke_width=stroke_width)
+            .move_to(center)
+            .set_color(stroke_color)
+            .set_fill(fill_color, opacity=opacity)
+        )
+    elif type_ == "arc":
+        center = shape[1]
+        to = shape[2]
+        from_ = shape[3]
+        radius = np.linalg.norm(from_ - center)
+        obj = ArcBetweenPoints(
+            start=from_,
+            end=to,
+            radius=radius,
+            stroke_width=stroke_width,
+        ).set_color(BASE_SHAPE_COLOR)
+    elif type_ == "angle":
+        points = shape[1:]
+        angle = get_angle(*points)
+        v1 = points[2] - points[1]
+        v2 = points[0] - points[1]
+
+        radius = min(np.linalg.norm(v1), np.linalg.norm(v2)) * 0.2
+        line1 = Line(start=points[0], end=points[1]).set_color(stroke_color)
+        line2 = Line(start=points[1], end=points[2]).set_color(stroke_color)
+
+        if abs(angle - np.pi / 2) < 1e-9:
+            p1 = points[1]
+            v1_ = radius / np.linalg.norm(v1) * v1
+            v2_ = radius / np.linalg.norm(v2) * v2
+
+            polygon_points = [p1, p1 + v1_, p1 + v1_ + v2_, p1 + v2_]
+            angle_obj = (
+                Polygon(*polygon_points)
+                .set_color(stroke_color)
+                .set_fill(fill_color, opacity=opacity)
+            )
+        else:
+            intersectee = (
+                Polygon(*points)
+                .set_color(stroke_color)
+                .set_fill(fill_color, opacity=opacity)
+            )
+            circle = Circle(radius=radius).move_to(points[1])
+
+            angle_obj = (
+                Intersection(circle, intersectee)
+                .set_color(stroke_color)
+                .set_fill(fill_color, opacity=opacity)
+            )
+        obj = VGroup(VGroup(line1, line2), angle_obj)
+    # elif type_ == "circle":
+    #     points = shape[1:]
+    #     center = points[0]
+    #     radius = np.linalg.norm(center - points[0])
+    #     obj = (
+    #         Circle(radius=radius)
+    #         .move_to(center)
+    #         .set_color(stroke_color)
+    #         .set_fill(fill_color, opacity=opacity)
+    #     )
+    else:
+        raise Exception("Unkown shape type: " + type_)
+
+    return obj
 
 
 def generate_scene(
@@ -310,45 +408,7 @@ def generate_scene(
                     # voice="en-US-BrandonNeural", global_speed=1.15
                 )
             )
-            x_coors = [coor[0] for _, coor in dict_["points"].items()]
-            y_coors = [coor[1] for _, coor in dict_["points"].items()]
-
-            xmin = min(x_coors)
-            xmax = max(x_coors)
-            ymin = min(y_coors)
-            ymax = max(y_coors)
-            xscale = (1 - figure_buff) * config["frame_width"] / (xmax - xmin)
-            yscale = (1 - figure_buff) * config["frame_height"] / (ymax - ymin)
-            coors_center = np.array(((xmax + xmin) / 2, (ymax + ymin) / 2, 0.0))
-            coors_scale = min(xscale, yscale)
-
-            def transform_coors(coor):
-                if not isinstance(coor, np.ndarray):
-                    coor = np.array(coor)
-                result = coors_scale * (coor - coors_center)
-                result[1] *= -1
-                return result
-
-            # Transform all coors
-            for label, coor in dict_["points"].items():
-                dict_["points"][label] = transform_coors(coor + [0])
-
-            for arr in dict_["shapes"]:
-                type_ = arr[0]
-                if type_ == "line":
-                    arr[1] = transform_coors(arr[1] + [0])
-                    arr[2] = transform_coors(arr[2] + [0])
-                elif type_ == "polygon":
-                    arr[1] = [transform_coors(i + [0]) for i in arr[1]]
-                elif type_ == "circle":
-                    arr[1] = transform_coors(arr[1] + [0])
-                    arr[2] *= coors_scale
-                elif type_ == "arc":
-                    arr[1] = transform_coors(arr[1] + [0])
-                    arr[2] = transform_coors(arr[2] + [0])
-                    arr[3] = transform_coors(arr[3] + [0])
-                else:
-                    raise Exception("Unkown shape type: " + type_)
+            preprocess_input_dict(dict_, figure_buff=figure_buff)
 
             # Create points
             self.points = {
@@ -382,41 +442,7 @@ def generate_scene(
 
             self.static_shapes = []
             for shape in dict_["shapes"]:
-                type_ = shape[0]
-                if type_ == "line":
-                    points = shape[1:]
-                    obj = Line(
-                        start=points[0],
-                        end=points[1],
-                        stroke_width=stroke_width,
-                    ).set_color(BASE_SHAPE_COLOR)
-                elif type_ == "polygon":
-                    points = shape[1]
-                    obj = Polygon(*points, stroke_width=stroke_width).set_color(
-                        BASE_SHAPE_COLOR
-                    )
-                elif type_ == "circle":
-                    center = shape[1]
-                    radius = shape[2] / 2
-                    obj = (
-                        Circle(radius, stroke_width=stroke_width)
-                        .move_to(center)
-                        .set_color(BASE_SHAPE_COLOR)
-                    )
-                elif type_ == "arc":
-                    center = shape[1]
-                    to = shape[2]
-                    from_ = shape[3]
-                    radius = np.linalg.norm(from_ - center)
-                    obj = ArcBetweenPoints(
-                        start=from_,
-                        end=to,
-                        radius=radius,
-                        stroke_width=stroke_width,
-                    ).set_color(BASE_SHAPE_COLOR)
-
-                else:
-                    raise Exception("Unkown shape type: " + type_)
+                obj = create_shape(shape, stroke_width=stroke_width)
                 self.static_shapes.append(obj)
 
             # Add shapes
@@ -576,8 +602,7 @@ config["quality"] = "low_quality"
 # import ipdb; ipdb.set_trace()
 
 scene1 = generate_scene(
-    # json.loads(open("book-01-proposition-47.json").read()), name="B01P47"
-    json.loads(open("book-03-proposition-02.json").read()),
-    name="B03P02",
+    json.loads(open("book-01-proposition-47.json").read()), name="B01P47"
+    # json.loads(open("book-03-proposition-02.json").read()), name="B03P02",
 )
 scene1.render()

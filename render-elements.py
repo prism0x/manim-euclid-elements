@@ -1,5 +1,6 @@
 from copy import deepcopy
 from curses.ascii import DEL
+from lib2to3.pytree import convert
 import re
 from manim import *
 from manim_speech import VoiceoverScene
@@ -190,14 +191,10 @@ def get_angle(p1, p2, p3):
     return angle
 
 
-def get_shape_animations(dict_, tag: str, point_labels):
-    global current_color_count
-    # letters, type_ = tag.split(" ")
+def convert_tag_to_shape_dict(tag, dict_):
     tokens = tag.split(" ")
     type_ = tokens[0]
     letters = tokens[1]
-    current_color = colors[current_color_count % len(colors)]
-    current_color_count += 1
 
     if type_ == "point":
         points = [dict_["points"][letters[0]]]
@@ -220,22 +217,54 @@ def get_shape_animations(dict_, tag: str, point_labels):
         center = dict_["points"][tokens[1]]
         diameter = 2 * np.linalg.norm(center - points[0])
         points = [center, diameter]
+    # elif type_ == "given":
     else:
         raise Exception(type_)
 
-    shape = [
-        type_,
-    ] + points
+    shape = [type_] + points
 
-    obj = create_shape(
-        shape, stroke_width=4, stroke_color=current_color, fill_color=current_color
-    )
+    return shape
+
+
+def get_shape_animations(dict_, tag: str, point_labels):
+    global current_color_count
+    # letters, type_ = tag.split(" ")
+    tokens = tag.split(" ")
+    type_ = tokens[0]
+    letters = tokens[1]
+    current_color = colors[current_color_count % len(colors)]
+    current_color_count += 1
+
+    if type_ == "given":
+        shapes = dict_["given"][letters]
+        objs = []
+        for shape in shapes:
+            objs.append(
+                create_shape(
+                    shape,
+                    stroke_width=4,
+                    stroke_color=current_color,
+                    fill_color=current_color,
+                )
+            )
+        obj = VGroup(*objs)
+    else:
+        shape = convert_tag_to_shape_dict(tag, dict_)
+        obj = create_shape(
+            shape, stroke_width=4, stroke_color=current_color, fill_color=current_color
+        )
+
+    if type_ == "circle":
+        letters = tokens[2]
 
     copy_letters = [
         point_labels[l].copy().set_fill(current_color)
         for l in letters
         if l in point_labels
     ]
+    # if type_ == "circle":
+    # import ipdb; ipdb.set_trace()
+
     letters_highlight = AnimationGroup(*[FadeIn(i) for i in copy_letters], lag_ratio=1)
     letters_unhighlight = AnimationGroup(
         *[FadeOut(i) for i in copy_letters],
@@ -269,17 +298,16 @@ def preprocess_input_dict(dict_, figure_buff):
     def transform_shape_coors(arr):
         type_ = arr[0]
         if type_ == "line":
-            arr[1] = transform_coors(arr[1] + [0])
-            arr[2] = transform_coors(arr[2] + [0])
+            for idx in range(1, len(arr)):
+                arr[idx] = transform_coors(arr[idx] + [0])
         elif type_ == "polygon":
             arr[1] = [transform_coors(i + [0]) for i in arr[1]]
         elif type_ == "circle":
             arr[1] = transform_coors(arr[1] + [0])
             arr[2] *= coors_scale
         elif type_ == "arc" or type_ == "anglecurve":
-            arr[1] = transform_coors(arr[1] + [0])
-            arr[2] = transform_coors(arr[2] + [0])
-            arr[3] = transform_coors(arr[3] + [0])
+            for idx in range(1, len(arr)):
+                arr[idx] = transform_coors(arr[idx] + [0])
         else:
             raise Exception("Unkown shape type: " + type_)
 
@@ -304,11 +332,16 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
     type_ = shape[0]
     if type_ == "line":
         points = shape[1:]
-        obj = Line(
-            start=points[0],
-            end=points[1],
-            stroke_width=stroke_width,
-        ).set_color(stroke_color)
+        objs = []
+        for idx in range(len(points) - 1):
+            objs.append(
+                Line(
+                    start=points[idx],
+                    end=points[idx + 1],
+                    stroke_width=stroke_width,
+                ).set_color(stroke_color)
+            )
+        obj = VGroup(*objs)
     elif type_ == "point":
         point = shape[1]
         obj = Dot(point).set_fill(fill_color)
@@ -338,8 +371,8 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
             end=to,
             radius=radius,
             stroke_width=stroke_width,
-        ).set_color(BASE_SHAPE_COLOR)
-    elif type_ == "angle":
+        ).set_color(stroke_color)
+    elif type_ == "angle" or type_ == "anglecurve":
         points = shape[1:]
         angle = get_angle(*points)
         v1 = points[2] - points[1]
@@ -602,7 +635,8 @@ config["quality"] = "low_quality"
 # import ipdb; ipdb.set_trace()
 
 scene1 = generate_scene(
-    json.loads(open("book-01-proposition-47.json").read()), name="B01P47"
-    # json.loads(open("book-03-proposition-02.json").read()), name="B03P02",
+    # json.loads(open("book-01-proposition-47.json").read()), name="B01P47"
+    json.loads(open("book-03-proposition-02.json").read()),
+    name="B03P02",
 )
 scene1.render()

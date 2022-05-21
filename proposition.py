@@ -1,6 +1,4 @@
 from copy import deepcopy
-from curses.ascii import DEL
-from lib2to3.pytree import convert
 import re
 from manim import *
 from manim_speech import VoiceoverScene
@@ -8,8 +6,6 @@ from manim_speech.interfaces.azure import AzureSpeechSynthesizer
 from math import floor, ceil
 import json
 import manimpango
-from matplotlib.pyplot import figure
-from numpy import poly
 
 # dict1 = json.loads(open("book-01-proposition-47-short.json").read())
 # dict1 = json.loads(open("book-01-proposition-47.json").read())
@@ -18,7 +14,7 @@ from numpy import poly
 # AUDIO_OFFSET = 0.0
 
 GLOBAL_SPEED = 1
-AUDIO_OFFSET = 0.0
+AUDIO_OFFSET = 0.05
 BASE_SHAPE_COLOR = GRAY_D
 BASE_DOT_COLOR = GRAY_C
 BASE_TEXT_COLOR = GRAY_C
@@ -72,6 +68,17 @@ class Section:
         )
 
 
+def preprocess_tag(tag: str):
+    tokens = tag.split()
+    assert len(tokens) <= 3
+    if tokens[1] == "circle" or tokens[1] == "arc":
+        return " ".join([tokens[1], tokens[2], tokens[0]])
+    elif tokens[1] in ["line", "polygon", "given", "point", "curve", "angle"]:
+        return " ".join([tokens[1], tokens[0]])
+    else:
+        raise Exception("Unknown type in tag:", tag)
+
+
 def reformat_prose(prose: str):
     def get_letters_from_tag(tag: str):
         tokens = tag.split(" ")
@@ -83,6 +90,13 @@ def reformat_prose(prose: str):
 
     result = re.sub("[^\S\n\t]+\[Prop.*\]\.", ".", prose)
     result = re.sub("\[Prop.*\]", "", result)
+    result = re.sub("[^\S\n\t]+\[Post.*\]\.", ".", result)
+    result = re.sub("\[Post.*\]", "", result)
+    result = re.sub("[^\S\n\t]+\[Def.*\]\.", ".", result)
+    result = re.sub("\[Def.*\]", "", result)
+    result = re.sub("[^\S\n\t]+\[C.N.*\]\.", ".", result)
+    result = re.sub("\[C.N.*\]", "", result)
+
     result = (
         result.replace(")", "")
         .replace("(", "")
@@ -101,6 +115,7 @@ def reformat_prose(prose: str):
         char = result[offset]
         if char == "{":
             tag = result[offset + 1 :].split("}")[0]
+            tag = preprocess_tag(tag)
             letters = get_letters_from_tag(tag)
             # bookmarks.append(Bookmark(tag_count, tag, len(tag_replaced)-extra_char_count))
             # tag_replaced += '<say-as interpret-as="characters">' + letters + "</say-as>"
@@ -201,17 +216,14 @@ def convert_tag_to_shape_dict(tag, dict_):
     elif type_ == "line":
         points = [dict_["points"][i] for i in letters]
     elif type_ == "polygon":
-        if letters in dict_["polygonl"]:
-            letters = dict_["polygonl"][letters]
+        if "polygonl" in dict_:
+            if letters in dict_["polygonl"]:
+                letters = dict_["polygonl"][letters]
         points = [[dict_["points"][i] for i in letters]]
-        # obj = (
-        #     Polygon(*points)
-        #     .set_color(current_color)
-        #     .set_fill(current_color, opacity=opacity)
-        # )
+    elif type_ == "curve":
+        points = [[dict_["points"][i] for i in letters]]
     elif type_ == "angle":
         points = [dict_["points"][i] for i in letters]
-
     elif type_ == "circle":
         points = [dict_["points"][i] for i in tokens[2]]
         center = dict_["points"][tokens[1]]
@@ -275,45 +287,66 @@ def get_shape_animations(dict_, tag: str, point_labels):
     return anim_in, anim_out
 
 
-def preprocess_input_dict(dict_, figure_buff):
-    x_coors = [coor[0] for _, coor in dict_["points"].items()]
-    y_coors = [coor[1] for _, coor in dict_["points"].items()]
+def preprocess_input_dict(dict_, figure_buff, scale=None, center=None):
+    if scale is None and center is None:
+        preprocess_input_dict(dict_, figure_buff, scale=1.0, center=np.array((0, 0, 0)))
 
-    xmin = min(x_coors)
-    xmax = max(x_coors)
-    ymin = min(y_coors)
-    ymax = max(y_coors)
-    xscale = (1 - figure_buff) * config["frame_width"] / (xmax - xmin)
-    yscale = (1 - figure_buff) * config["frame_height"] / (ymax - ymin)
-    coors_center = np.array(((xmax + xmin) / 2, (ymax + ymin) / 2, 0.0))
-    coors_scale = min(xscale, yscale)
+        static_shapes = []
+        for shape in dict_["shapes"]:
+            obj = create_shape(shape)
+            static_shapes.append(obj)
+        all_shapes = VGroup(*static_shapes)
+
+        xmin = all_shapes.get_center()[0] - all_shapes.width / 2
+        xmax = all_shapes.get_center()[0] + all_shapes.width / 2
+        ymin = all_shapes.get_center()[1] - all_shapes.height / 2
+        ymax = all_shapes.get_center()[1] + all_shapes.height / 2
+        # Add shapes
+        # x_coors = [coor[0] for _, coor in dict_["points"].items()]
+        # y_coors = [coor[1] for _, coor in dict_["points"].items()]
+
+        # xmin = min(x_coors)
+        # xmax = max(x_coors)
+        # ymin = min(y_coors)
+        # ymax = max(y_coors)
+        xscale = (1 - figure_buff) * config["frame_width"] / (xmax - xmin)
+        yscale = (1 - figure_buff) * config["frame_height"] / (ymax - ymin)
+        coors_center = np.array(((xmax + xmin) / 2, (ymax + ymin) / 2, 0.0))
+        coors_scale = min(xscale, yscale)
+    else:
+        coors_scale = scale
+        coors_center = center
 
     def transform_coors(coor):
         if not isinstance(coor, np.ndarray):
             coor = np.array(coor)
+        if len(coor) == 2:
+            coor = np.append(coor, 0.0)
+
         result = coors_scale * (coor - coors_center)
-        result[1] *= -1
+        if scale == None and center == None:
+            result[1] *= -1
         return result
 
     def transform_shape_coors(arr):
         type_ = arr[0]
         if type_ == "line":
             for idx in range(1, len(arr)):
-                arr[idx] = transform_coors(arr[idx] + [0])
-        elif type_ == "polygon":
-            arr[1] = [transform_coors(i + [0]) for i in arr[1]]
+                arr[idx] = transform_coors(arr[idx])
+        elif type_ == "polygon" or type_ == "curve":
+            arr[1] = [transform_coors(i) for i in arr[1]]
         elif type_ == "circle":
-            arr[1] = transform_coors(arr[1] + [0])
+            arr[1] = transform_coors(arr[1])
             arr[2] *= coors_scale
         elif type_ == "arc" or type_ == "anglecurve":
             for idx in range(1, len(arr)):
-                arr[idx] = transform_coors(arr[idx] + [0])
+                arr[idx] = transform_coors(arr[idx])
         else:
             raise Exception("Unkown shape type: " + type_)
 
     # Transform all coors
     for label, coor in dict_["points"].items():
-        dict_["points"][label] = transform_coors(coor + [0])
+        dict_["points"][label] = transform_coors(coor)
 
     for arr in dict_["shapes"]:
         transform_shape_coors(arr)
@@ -352,6 +385,18 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
             .set_color(stroke_color)
             .set_fill(fill_color, opacity=opacity)
         )
+    elif type_ == "curve":
+        points = shape[1]
+        objs = []
+        for idx in range(len(points) - 1):
+            objs.append(
+                Line(
+                    start=points[idx],
+                    end=points[idx + 1],
+                    stroke_width=stroke_width,
+                ).set_color(stroke_color)
+            )
+        obj = VGroup(*objs)
     elif type_ == "circle":
         center = shape[1]
         radius = shape[2] / 2
@@ -406,17 +451,10 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
                 .set_color(stroke_color)
                 .set_fill(fill_color, opacity=opacity)
             )
-        obj = VGroup(VGroup(line1, line2), angle_obj)
-    # elif type_ == "circle":
-    #     points = shape[1:]
-    #     center = points[0]
-    #     radius = np.linalg.norm(center - points[0])
-    #     obj = (
-    #         Circle(radius=radius)
-    #         .move_to(center)
-    #         .set_color(stroke_color)
-    #         .set_fill(fill_color, opacity=opacity)
-    #     )
+        if type_ == "anglecurve":
+            obj = angle_obj
+        else:
+            obj = VGroup(VGroup(line1, line2), angle_obj)
     else:
         raise Exception("Unkown shape type: " + type_)
 
@@ -438,7 +476,8 @@ def generate_scene(
                     voice="en-US-AriaNeural",
                     style="newscast-casual",
                     global_speed=GLOBAL_SPEED
-                    # voice="en-US-BrandonNeural", global_speed=1.15
+                    # voice="en-US-ChristopherNeural",
+                    # voice="en-US-BrandonNeural",
                 )
             )
             preprocess_input_dict(dict_, figure_buff=figure_buff)
@@ -478,16 +517,24 @@ def generate_scene(
                 obj = create_shape(shape, stroke_width=stroke_width)
                 self.static_shapes.append(obj)
 
+            initial_shapes = []
             # Add shapes
             for obj in self.static_shapes:
-                self.add(obj)
+                initial_shapes.append(obj)
 
             # Add points
             for _, point in self.points.items():
-                self.add(point)
+                initial_shapes.append(point)
             # Add point labels
             for _, point_label in self.point_labels.items():
-                self.add(point_label)
+                initial_shapes.append(point_label)
+            initial_shapes = VGroup(*initial_shapes)
+
+            title = Tex(dict_["title"])
+            self.play(Write(title))
+            self.wait()
+            self.play(title.animate.to_corner(UL).scale(0.75))
+            self.play(Write(initial_shapes), run_time=3)
 
             prose: str = dict_["prose"]
             lines = prose.split("\n")
@@ -625,18 +672,22 @@ def generate_scene(
                 if text2 is not None:
                     self.remove(text2)
 
+            self.play(Unwrite(initial_shapes), Unwrite(title), run_time=3)
+            self.wait(0.5)
+
     if name is not None:
         MyScene.__name__ = name
-    return MyScene()
+    return MyScene
 
 
-config["disable_caching"] = True
-config["quality"] = "low_quality"
-# import ipdb; ipdb.set_trace()
+if __name__ == "__main__":
+    config["disable_caching"] = True
+    config["quality"] = "low_quality"
+    # import ipdb; ipdb.set_trace()
 
-scene1 = generate_scene(
-    # json.loads(open("book-01-proposition-47.json").read()), name="B01P47"
-    json.loads(open("book-03-proposition-02.json").read()),
-    name="B03P02",
-)
-scene1.render()
+    scene1 = generate_scene(
+        # json.loads(open("book-01-proposition-47.json").read()), name="B01P47"
+        json.loads(open("book-03-proposition-02.json").read()),
+        name="B03P02",
+    )()
+    scene1.render()

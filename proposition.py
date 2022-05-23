@@ -388,14 +388,15 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
     elif type_ == "curve":
         points = shape[1]
         objs = []
-        for idx in range(len(points) - 1):
-            objs.append(
-                Line(
-                    start=points[idx],
-                    end=points[idx + 1],
-                    stroke_width=stroke_width,
-                ).set_color(stroke_color)
-            )
+        import ipdb; ipdb.set_trace()
+        # for idx in range(len(points) - 1):
+        #     objs.append(
+        #         Line(
+        #             start=points[idx],
+        #             end=points[idx + 1],
+        #             stroke_width=stroke_width,
+        #         ).set_color(stroke_color)
+        #     )
         obj = VGroup(*objs)
     elif type_ == "circle":
         center = shape[1]
@@ -419,7 +420,7 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
         ).set_color(stroke_color)
     elif type_ == "angle" or type_ == "anglecurve":
         points = shape[1:]
-        angle = get_angle(*points)
+        # angle = get_angle(*points)
         v1 = points[2] - points[1]
         v2 = points[0] - points[1]
 
@@ -427,34 +428,43 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
         line1 = Line(start=points[0], end=points[1]).set_color(stroke_color)
         line2 = Line(start=points[1], end=points[2]).set_color(stroke_color)
 
-        if abs(angle - np.pi / 2) < 1e-9:
-            p1 = points[1]
-            v1_ = radius / np.linalg.norm(v1) * v1
-            v2_ = radius / np.linalg.norm(v2) * v2
+        intersectee = (
+            Polygon(*points)
+            .set_color(stroke_color)
+            .set_fill(fill_color, opacity=opacity)
+        )
+        circle = Circle(radius=radius).move_to(points[1])
 
-            polygon_points = [p1, p1 + v1_, p1 + v1_ + v2_, p1 + v2_]
-            angle_obj = (
-                Polygon(*polygon_points)
-                .set_color(stroke_color)
-                .set_fill(fill_color, opacity=opacity)
-            )
-        else:
-            intersectee = (
-                Polygon(*points)
-                .set_color(stroke_color)
-                .set_fill(fill_color, opacity=opacity)
-            )
-            circle = Circle(radius=radius).move_to(points[1])
-
-            angle_obj = (
-                Intersection(circle, intersectee)
-                .set_color(stroke_color)
-                .set_fill(fill_color, opacity=opacity)
-            )
+        angle_obj = (
+            Intersection(circle, intersectee)
+            .set_color(stroke_color)
+            .set_fill(fill_color, opacity=opacity)
+        )
         if type_ == "anglecurve":
             obj = angle_obj
         else:
             obj = VGroup(VGroup(line1, line2), angle_obj)
+    elif type_ == "rightangle":
+        points = shape[1:]
+        # angle = get_angle(*points)
+        v1 = points[2] - points[1]
+        v2 = points[0] - points[1]
+
+        radius = min(np.linalg.norm(v1), np.linalg.norm(v2)) * 0.2
+        line1 = Line(start=points[0], end=points[1]).set_color(stroke_color)
+        line2 = Line(start=points[1], end=points[2]).set_color(stroke_color)
+
+        p1 = points[1]
+        v1_ = radius / np.linalg.norm(v1) * v1
+        v2_ = radius / np.linalg.norm(v2) * v2
+
+        polygon_points = [p1, p1 + v1_, p1 + v1_ + v2_, p1 + v2_]
+        angle_obj = (
+            Polygon(*polygon_points)
+            .set_color(stroke_color)
+            .set_fill(fill_color, opacity=opacity)
+        )
+        obj = VGroup(VGroup(line1, line2), angle_obj)
     else:
         raise Exception("Unkown shape type: " + type_)
 

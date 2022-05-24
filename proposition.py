@@ -3,7 +3,7 @@ import re
 from manim import *
 from manim_speech import VoiceoverScene
 from manim_speech.interfaces.azure import AzureSpeechSynthesizer
-from math import floor, ceil
+from math import atan2, floor, ceil, pi
 import json
 import manimpango
 
@@ -71,7 +71,7 @@ class Section:
 def preprocess_tag(tag: str):
     tokens = tag.split()
     assert len(tokens) <= 3
-    if tokens[1] == "circle" or tokens[1] == "arc":
+    if tokens[1] in ["circle", "arc", "arcc", "gnomon"]:
         return " ".join([tokens[1], tokens[2], tokens[0]])
     elif tokens[1] in ["line", "polygon", "given", "point", "curve", "angle"]:
         return " ".join([tokens[1], tokens[0]])
@@ -229,7 +229,12 @@ def convert_tag_to_shape_dict(tag, dict_):
         center = dict_["points"][tokens[1]]
         diameter = 2 * np.linalg.norm(center - points[0])
         points = [center, diameter]
-    # elif type_ == "given":
+    elif type_ == "arc" or type_ == "arcc":
+        points = [dict_["points"][i] for i in tokens[2]]
+        to = points[0]
+        from_ = points[1]
+        center = dict_["points"][tokens[1]]
+        points = [center, to, from_]
     else:
         raise Exception(type_)
 
@@ -332,13 +337,16 @@ def preprocess_input_dict(dict_, figure_buff, scale=None, center=None):
         type_ = arr[0]
         if type_ == "line":
             for idx in range(1, len(arr)):
+                if not isinstance(arr[idx], (list, np.ndarray)):
+                    continue
                 arr[idx] = transform_coors(arr[idx])
+
         elif type_ == "polygon" or type_ == "curve":
             arr[1] = [transform_coors(i) for i in arr[1]]
         elif type_ == "circle":
             arr[1] = transform_coors(arr[1])
             arr[2] *= coors_scale
-        elif type_ == "arc" or type_ == "anglecurve":
+        elif type_ in ["arc", "arcc", "anglecurve", "gnomon"]:
             for idx in range(1, len(arr)):
                 arr[idx] = transform_coors(arr[idx])
         else:
@@ -364,16 +372,22 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
         opacity = 0.75
     type_ = shape[0]
     if type_ == "line":
-        points = shape[1:]
+        points = [i for i in shape[1:] if isinstance(i, (list, np.ndarray))]
+        dashed = False
+        for i in shape:
+            if isinstance(i, dict) and "dashed" in i and i["dashed"] == True:
+                dashed = True
+
         objs = []
         for idx in range(len(points) - 1):
-            objs.append(
-                Line(
-                    start=points[idx],
-                    end=points[idx + 1],
-                    stroke_width=stroke_width,
-                ).set_color(stroke_color)
-            )
+            line = Line(
+                start=points[idx],
+                end=points[idx + 1],
+                stroke_width=stroke_width,
+            ).set_color(stroke_color)
+            if dashed:
+                line = DashedVMobject(line)
+            objs.append(line)
         obj = VGroup(*objs)
     elif type_ == "point":
         point = shape[1]
@@ -388,15 +402,15 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
     elif type_ == "curve":
         points = shape[1]
         objs = []
-        import ipdb; ipdb.set_trace()
-        # for idx in range(len(points) - 1):
-        #     objs.append(
-        #         Line(
-        #             start=points[idx],
-        #             end=points[idx + 1],
-        #             stroke_width=stroke_width,
-        #         ).set_color(stroke_color)
-        #     )
+        # TODO: The lines need to be smoothed
+        for idx in range(len(points) - 1):
+            objs.append(
+                Line(
+                    start=points[idx],
+                    end=points[idx + 1],
+                    stroke_width=stroke_width,
+                ).set_color(stroke_color)
+            )
         obj = VGroup(*objs)
     elif type_ == "circle":
         center = shape[1]
@@ -407,17 +421,40 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
             .set_color(stroke_color)
             .set_fill(fill_color, opacity=opacity)
         )
-    elif type_ == "arc":
+    elif type_ in ["arc", "arcc", "gnomon"]:
         center = shape[1]
-        to = shape[2]
-        from_ = shape[3]
+        to, from_ = shape[2:]
         radius = np.linalg.norm(from_ - center)
-        obj = ArcBetweenPoints(
-            start=from_,
-            end=to,
+
+        foc = from_ - center
+        toc = to - center
+        if type_ == "arc":
+            start_angle = atan2(toc[1], toc[0])
+            angle = atan2(foc[1], foc[0]) - start_angle
+            while angle > start_angle:
+                angle -= 2 * pi
+        else:
+            start_angle = atan2(foc[1], foc[0])
+            angle = atan2(toc[1], toc[0]) - start_angle
+            while angle < start_angle:
+                angle += 2 * pi
+
+        # if type_ == "arc":
+        # else:
+        #     from_, to = shape[2:]
+        #     radius = -1 * np.linalg.norm(from_ - center)
+
+        obj = Arc(
+            # start=from_,
+            # end=to,
+            start_angle=start_angle,
+            angle=angle,
+            arc_center=center,
             radius=radius,
             stroke_width=stroke_width,
         ).set_color(stroke_color)
+        if type_ == "gnomon":
+            obj = DashedVMobject(obj)
     elif type_ == "angle" or type_ == "anglecurve":
         points = shape[1:]
         # angle = get_angle(*points)
@@ -551,6 +588,7 @@ def generate_scene(
             lines = [i for i in lines if i != ""]
 
             self.wait(0.5)
+            # return
 
             for line in lines:
                 voiceover_txt, bookmarks = reformat_prose(line)

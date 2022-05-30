@@ -1,5 +1,6 @@
 from copy import deepcopy
 import re
+import textwrap
 from manim import *
 from manim_speech import VoiceoverScene
 from manim_speech.interfaces.azure import AzureSpeechSynthesizer
@@ -20,6 +21,9 @@ BASE_DOT_COLOR = GRAY_C
 BASE_TEXT_COLOR = GRAY_C
 
 HIGHLIGHT_COLOR = YELLOW_B
+HIGHLIGHTED_TEXT_COLOR = GRAY_A
+
+WIDTH_TEXT_PCT = 0.4
 
 
 class Bookmark:
@@ -185,10 +189,10 @@ def transpose_label(coor, arr, size):
 colors = [
     BLUE_B,
     # TEAL_B,
-    # GREEN_B,
+    GREEN_B,
     YELLOW_B,
     # GOLD_B,
-    # RED_B,
+    RED_B,
     MAROON_B,
     # PURPLE_B,
 ]
@@ -289,7 +293,7 @@ def get_shape_animations(dict_, tag: str, point_labels):
     anim_in = AnimationGroup(Write(obj), letters_highlight)
     anim_out = AnimationGroup(FadeOut(obj), letters_unhighlight)
 
-    return anim_in, anim_out
+    return anim_in, anim_out, current_color
 
 
 def preprocess_input_dict(dict_, figure_buff, scale=None, center=None):
@@ -314,7 +318,12 @@ def preprocess_input_dict(dict_, figure_buff, scale=None, center=None):
         # xmax = max(x_coors)
         # ymin = min(y_coors)
         # ymax = max(y_coors)
-        xscale = (1 - figure_buff) * config["frame_width"] / (xmax - xmin)
+        xscale = (
+            (1 - figure_buff)
+            * (1 - WIDTH_TEXT_PCT)
+            * config["frame_width"]
+            / (xmax - xmin)
+        )
         yscale = (1 - figure_buff) * config["frame_height"] / (ymax - ymin)
         coors_center = np.array(((xmax + xmin) / 2, (ymax + ymin) / 2, 0.0))
         coors_scale = min(xscale, yscale)
@@ -331,6 +340,7 @@ def preprocess_input_dict(dict_, figure_buff, scale=None, center=None):
         result = coors_scale * (coor - coors_center)
         if scale == None and center == None:
             result[1] *= -1
+            result += config["frame_width"] * WIDTH_TEXT_PCT / 2 * LEFT
         return result
 
     def transform_shape_coors(arr):
@@ -510,7 +520,7 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
 
 def generate_scene(
     dict_,
-    figure_buff=0.4,
+    figure_buff=0.25,
     dot_radius=0.03,
     point_label_font_size=30,
     stroke_width=2,
@@ -542,7 +552,7 @@ def generate_scene(
                     label,
                     font_size=point_label_font_size,
                     weight=manimpango.Weight.HEAVY.name,
-                    font="Open Sans",
+                    font="Computer Modern Sans",
                     color=BASE_TEXT_COLOR,
                 )
                 for label, _ in dict_["letters"].items()
@@ -577,7 +587,7 @@ def generate_scene(
                 initial_shapes.append(point_label)
             initial_shapes = VGroup(*initial_shapes)
 
-            title = Tex(dict_["title"])
+            title = Tex(r"\textsf{" + dict_["title"] + r"}")
             self.play(Write(title))
             self.wait()
             self.play(title.animate.to_corner(UL).scale(0.75))
@@ -590,7 +600,7 @@ def generate_scene(
             self.wait(0.5)
             # return
 
-            for line in lines:
+            for line_idx, line in enumerate(lines):
                 voiceover_txt, bookmarks = reformat_prose(line)
                 if "Prop" in "voiceover_txt":
                     raise Exception()
@@ -693,32 +703,88 @@ def generate_scene(
                             )
                             sections[i + 1].disappearing_shapes = []
 
+                    disp_text = " ".join([s.text for s in sections])
+                    disp_text = disp_text.replace(" ,", ",").replace(" .", ".")
+                    # disp_text_width = config["frame_width"] * WIDTH_TEXT_PCT
+                    # disp_text_height = config["frame_height"] * (1 - figure_buff / 2)
+                    par = (
+                        # Paragraph(
+                        #     *textwrap.wrap(disp_text, width=22),
+                        #     font="Futura",
+                        #     # width=disp_text_width,
+                        #     # height=disp_text_height,
+                        #     weight=manimpango.Weight.LIGHT.name,
+                        #     line_spacing=0.75,
+                        #     font_size=25,
+                        # )
+                        Tex(
+                            r"\flushleft\textsf{"
+                            + r"\\".join(textwrap.wrap(disp_text, width=22))
+                            + r"}",
+                            # tex_template=TexFontTemplates.urw_avant_garde,
+                            font_size=45,
+                        )
+                    )
+                    max_height = config["frame_height"] * (1 - figure_buff)
+                    if par.height > max_height:
+                        par.scale_to_fit_height(max_height)
+
+                    par = (
+                        par.set_fill(BASE_SHAPE_COLOR)
+                        .align_on_border(LEFT, buff=0)
+                        .shift(
+                            config["frame_width"]
+                            * (1 - WIDTH_TEXT_PCT)
+                            * RIGHT
+                            # + config["frame_height"] * figure_buff / 2 * DOWN
+                        )
+                    )
+
+                    # self.play(FadeIn(par))
+                    self.add(par)
+                    char_counter = 0
+                    self.highlights = []
+
                     for s in sections:
+                        char_counter_new = char_counter + len(s.text)
+                        new_part = par[0][char_counter : char_counter_new]
                         if len(s.appearing_shapes) == 0:
-                            self.safe_wait(s.duration)
+                            self.play(new_part.animate.set_fill(HIGHLIGHTED_TEXT_COLOR), run_time=s.duration)
                         else:
-                            anim_in, anim_out = get_shape_animations(
+                            anim_in, anim_out, current_color = get_shape_animations(
                                 dict_, s.appearing_shapes[0], self.point_labels
                             )
 
                             if prev_anim_out is None:
-                                self.play(anim_in, run_time=s.duration)
+                                self.play(
+                                    anim_in,
+                                    new_part.animate.set_fill(current_color),
+                                    run_time=s.duration,
+                                )
                             else:
-                                self.play(prev_anim_out, anim_in, run_time=s.duration)
+                                self.play(
+                                    prev_anim_out,
+                                    anim_in,
+                                    new_part.animate.set_fill(current_color),
+                                    run_time=s.duration,
+                                )
                                 prev_anim_out = None
                             prev_anim_out = anim_out
 
-                        if text2 is not None:
-                            self.remove(text2)
-                        text2 = Text(s.text).shift(3.3 * DOWN)
-                        self.add(text2)
+                        # if text2 is not None:
+                        #     self.remove(text2)
+                        # text2 = Text(s.text).shift(3.3 * DOWN)
+                        # self.add(text2)
+                        char_counter = char_counter_new
 
                     if prev_anim_out is not None:
                         self.play(prev_anim_out)
-                    self.wait()
-
+                    # self.wait()
+                    self.play(FadeOut(par))
                 if text2 is not None:
                     self.remove(text2)
+                # if line_idx == 2:
+                #     break
 
             self.play(Unwrite(initial_shapes), Unwrite(title), run_time=3)
             self.wait(0.5)

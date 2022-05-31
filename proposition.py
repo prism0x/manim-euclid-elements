@@ -6,7 +6,8 @@ from manim_speech import VoiceoverScene
 from manim_speech.interfaces.azure import AzureSpeechSynthesizer
 from math import atan2, floor, ceil, pi
 import json
-import manimpango
+
+# import manimpango
 
 # dict1 = json.loads(open("book-01-proposition-47-short.json").read())
 # dict1 = json.loads(open("book-01-proposition-47.json").read())
@@ -522,7 +523,7 @@ def generate_scene(
     dict_,
     figure_buff=0.25,
     dot_radius=0.03,
-    point_label_font_size=30,
+    point_label_font_size=40,
     stroke_width=2,
     name=None,
 ):
@@ -548,13 +549,18 @@ def generate_scene(
 
             # Create point labels
             self.point_labels = {
-                label: Text(
-                    label,
+                label: Tex(
+                    r"\textbf{\textsf{" + label + r"}}",
                     font_size=point_label_font_size,
-                    weight=manimpango.Weight.HEAVY.name,
-                    font="Computer Modern Sans",
                     color=BASE_TEXT_COLOR,
                 )
+                # label: Text(
+                #     label,
+                #     font_size=point_label_font_size,
+                #     weight=manimpango.Weight.HEAVY.name,
+                #     font="Computer Modern Sans",
+                #     color=BASE_TEXT_COLOR,
+                # )
                 for label, _ in dict_["letters"].items()
             }
 
@@ -598,7 +604,6 @@ def generate_scene(
             lines = [i for i in lines if i != ""]
 
             self.wait(0.5)
-            # return
 
             for line_idx, line in enumerate(lines):
                 voiceover_txt, bookmarks = reformat_prose(line)
@@ -703,10 +708,16 @@ def generate_scene(
                             )
                             sections[i + 1].disappearing_shapes = []
 
-                    disp_text = " ".join([s.text for s in sections])
-                    disp_text = disp_text.replace(" ,", ",").replace(" .", ".")
-                    # disp_text_width = config["frame_width"] * WIDTH_TEXT_PCT
-                    # disp_text_height = config["frame_height"] * (1 - figure_buff / 2)
+                    # disp_text = " ".join([s.text for s in sections])
+                    # disp_text = disp_text.replace(" ,", ",").replace(" .", ".")
+                    disp_text = voiceover_txt.replace(
+                        r'<say-as interpret-as="characters">', r"{"
+                    ).replace(r"</say-as>", r"}")
+
+                    disp_text = r"\\".join(textwrap.wrap(disp_text, width=22)).replace(
+                        r"{", r"\textbf{"
+                    )
+                    disp_text = r"\flushleft\textsf{" + disp_text + r"}"
                     par = (
                         # Paragraph(
                         #     *textwrap.wrap(disp_text, width=22),
@@ -718,13 +729,12 @@ def generate_scene(
                         #     font_size=25,
                         # )
                         Tex(
-                            r"\flushleft\textsf{"
-                            + r"\\".join(textwrap.wrap(disp_text, width=22))
-                            + r"}",
+                            disp_text,
                             # tex_template=TexFontTemplates.urw_avant_garde,
                             font_size=45,
                         )
                     )
+
                     max_height = config["frame_height"] * (1 - figure_buff)
                     if par.height > max_height:
                         par.scale_to_fit_height(max_height)
@@ -746,10 +756,13 @@ def generate_scene(
                     self.highlights = []
 
                     for s in sections:
-                        char_counter_new = char_counter + len(s.text)
-                        new_part = par[0][char_counter : char_counter_new]
+                        char_counter_new = char_counter + len(s.text.replace(" ", ""))
+                        new_part = par[0][char_counter:char_counter_new]
                         if len(s.appearing_shapes) == 0:
-                            self.play(new_part.animate.set_fill(HIGHLIGHTED_TEXT_COLOR), run_time=s.duration)
+                            self.play(
+                                new_part.animate.set_fill(HIGHLIGHTED_TEXT_COLOR),
+                                run_time=s.duration,
+                            )
                         else:
                             anim_in, anim_out, current_color = get_shape_animations(
                                 dict_, s.appearing_shapes[0], self.point_labels

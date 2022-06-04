@@ -7,6 +7,8 @@ from manim_speech.interfaces.azure import AzureSpeechSynthesizer
 from math import atan2, floor, ceil, pi
 import json
 
+from helper import points_to_bezier_curve
+
 # import manimpango
 
 # dict1 = json.loads(open("book-01-proposition-47-short.json").read())
@@ -24,6 +26,7 @@ BASE_TEXT_COLOR = GRAY_C
 HIGHLIGHT_COLOR = YELLOW_B
 HIGHLIGHTED_TEXT_COLOR = GRAY_A
 
+DEFAULT_FIGURE_BUFF = 0.35
 WIDTH_TEXT_PCT = 0.4
 
 
@@ -101,6 +104,11 @@ def reformat_prose(prose: str):
     result = re.sub("\[Def.*\]", "", result)
     result = re.sub("[^\S\n\t]+\[C.N.*\]\.", ".", result)
     result = re.sub("\[C.N.*\]", "", result)
+    result = re.sub("[^\S]+---", "---", result)
+    result = re.sub("---[^\S]+", "---", result)
+    result = re.sub("[^\S]+-", "-", result)
+    result = re.sub("-[^\S]+", "-", result)
+    result = re.sub("---", ", ", result)
 
     result = (
         result.replace(")", "")
@@ -413,16 +421,21 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
     elif type_ == "curve":
         points = shape[1]
         objs = []
+        obj = (
+            points_to_bezier_curve(points)
+            .set_color(stroke_color)
+            .set_stroke(width=stroke_width)
+        )
         # TODO: The lines need to be smoothed
-        for idx in range(len(points) - 1):
-            objs.append(
-                Line(
-                    start=points[idx],
-                    end=points[idx + 1],
-                    stroke_width=stroke_width,
-                ).set_color(stroke_color)
-            )
-        obj = VGroup(*objs)
+        # for idx in range(len(points) - 1):
+        #     objs.append(
+        #         Line(
+        #             start=points[idx],
+        #             end=points[idx + 1],
+        #             stroke_width=stroke_width,
+        #         ).set_color(stroke_color)
+        #     )
+        # obj = VGroup(*objs)
     elif type_ == "circle":
         center = shape[1]
         radius = shape[2] / 2
@@ -439,7 +452,7 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
 
         foc = from_ - center
         toc = to - center
-        if type_ == "arc":
+        if type_ == "arc" or type_ == "gnomon":
             start_angle = atan2(toc[1], toc[0])
             angle = atan2(foc[1], foc[0]) - start_angle
             while angle > start_angle:
@@ -521,22 +534,23 @@ def create_shape(shape, stroke_width=2, stroke_color=BASE_SHAPE_COLOR, fill_colo
 
 def generate_scene(
     dict_,
-    figure_buff=0.25,
+    figure_buff=DEFAULT_FIGURE_BUFF,
     dot_radius=0.03,
-    point_label_font_size=40,
+    point_label_font_size=35,
     stroke_width=2,
     name=None,
 ):
     class MyScene(VoiceoverScene):
         def construct(self):
-            self.init_voiceover(
+            self.set_speech_synthesizer(
                 AzureSpeechSynthesizer(
                     voice="en-US-AriaNeural",
                     style="newscast-casual",
                     global_speed=GLOBAL_SPEED
                     # voice="en-US-ChristopherNeural",
                     # voice="en-US-BrandonNeural",
-                )
+                ),
+                create_subcaption=False,
             )
             preprocess_input_dict(dict_, figure_buff=figure_buff)
 
@@ -548,21 +562,19 @@ def generate_scene(
             }
 
             # Create point labels
-            self.point_labels = {
-                label: Tex(
+            self.point_labels = {}
+            for label, _ in dict_["letters"].items():
+                if "smallletters" in dict_ and label in dict_["smallletters"]:
+                    font_size = point_label_font_size * 0.7
+                else:
+                    font_size = point_label_font_size
+
+                self.point_labels[label] = Tex(
                     r"\textbf{\textsf{" + label + r"}}",
-                    font_size=point_label_font_size,
+                    font_size=font_size,
                     color=BASE_TEXT_COLOR,
                 )
-                # label: Text(
-                #     label,
-                #     font_size=point_label_font_size,
-                #     weight=manimpango.Weight.HEAVY.name,
-                #     font="Computer Modern Sans",
-                #     color=BASE_TEXT_COLOR,
-                # )
-                for label, _ in dict_["letters"].items()
-            }
+                # for label, _ in dict_["letters"].items()
 
             # Transpose labels
             for label, point_label in self.point_labels.items():
@@ -572,7 +584,8 @@ def generate_scene(
                         self.points[label].get_center(),
                         dict_["letters"][label],
                         [point_label.width, point_label.height],
-                    )
+                    ),
+                    # aligned_edge=UP,
                 )
 
             self.static_shapes = []
@@ -593,7 +606,7 @@ def generate_scene(
                 initial_shapes.append(point_label)
             initial_shapes = VGroup(*initial_shapes)
 
-            title = Tex(r"\textsf{" + dict_["title"] + r"}")
+            title = Tex(r"\textsf{" + "Proposition " + dict_["id"] + r"}")
             self.play(Write(title))
             self.wait()
             self.play(title.animate.to_corner(UL).scale(0.75))
@@ -734,6 +747,7 @@ def generate_scene(
                             font_size=45,
                         )
                     )
+                    # import ipdb; ipdb.set_trace()
 
                     max_height = config["frame_height"] * (1 - figure_buff)
                     if par.height > max_height:
@@ -756,8 +770,36 @@ def generate_scene(
                     self.highlights = []
 
                     for s in sections:
-                        char_counter_new = char_counter + len(s.text.replace(" ", ""))
+                        s.text_alt = (
+                            s.text.replace(r"---", r"-")
+                            .replace("ffi", "f")
+                            .replace("fl", "f")
+                            .replace("fi", "f")
+                            .replace("ff", "f")
+                            .replace(" ", "")
+                        )
+                        s.text_char_count = len(s.text_alt)
+                    try:
+                        assert len(par[0]) == sum([s.text_char_count for s in sections])
+                    except AssertionError:
+                        print(len(par[0]))
+                        print(sum([s.text_char_count for s in sections]))
+                        print([s.text_alt for s in sections])
+                        print([s.text for s in sections])
+
+                        par.submobjects.append(
+                            VGroup(
+                                *[
+                                    SurroundingRectangle(i, buff=0.02, stroke_width=1)
+                                    for i in par[0]
+                                ]
+                            )
+                        )
+
+                    for s in sections:
+                        char_counter_new = char_counter + s.text_char_count
                         new_part = par[0][char_counter:char_counter_new]
+                        # print("   >> ", s.text, new_part)
                         if len(s.appearing_shapes) == 0:
                             self.play(
                                 new_part.animate.set_fill(HIGHLIGHTED_TEXT_COLOR),

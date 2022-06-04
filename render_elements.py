@@ -27,6 +27,12 @@ parser.add_argument(
     action="store_true",
     help="Skip existing propositions",
 )
+parser.add_argument(
+    "-p",
+    "--preview",
+    action="store_true",
+    help="Preview the scenes",
+)
 args = parser.parse_args()
 
 
@@ -52,16 +58,30 @@ books = [
 
 skipped_ids = ["3.25", "3.33", "3.35", "3.36"]
 all_propositions = {}
+
+# for id in args.propositions:
+#     prop_id =  id.split(".")[1]
+#     if prop_id == "*":
+#         args.propositions.remove(id)
+
+
 for path in books:
     book_dict = json.loads(open(path).read())
     # book_dict = [book_dict[8]]
     basename = os.path.basename(path).split(".")[0]
     for prop_dict in book_dict:
         title = prop_dict["title"]
-        if "Proposition" not in title or prop_dict["id"] in skipped_ids:
+        prop_id = prop_dict["id"]
+        if "Proposition" not in title or prop_id in skipped_ids:
             continue
-        if args.propositions == [] or prop_dict["id"] in args.propositions:
-            all_propositions[prop_dict["id"]] = prop_dict
+        book_id = prop_id.split(".")[0]
+        wildcard = book_id + ".*"
+        if (
+            args.propositions == []
+            or prop_id in args.propositions
+            or wildcard in args.propositions
+        ):
+            all_propositions[prop_id] = prop_dict
 
 
 for id, prop_dict in all_propositions.items():
@@ -81,7 +101,8 @@ for id, prop_dict in all_propositions.items():
         path = HIGH_QUALITY_DIR + name + ".mp4"
 
     if not os.path.exists(path) or not args.skip_existing:
-        scene().render()
+        s = scene()
+        s.render(preview=args.preview)
     else:
         print(">> Skipping render")
 

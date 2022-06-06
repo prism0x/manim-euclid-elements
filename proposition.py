@@ -91,7 +91,7 @@ def reformat_prose(prose: str):
     def get_letters_from_tag(tag: str):
         tokens = tag.split(" ")
         type_ = tokens[0]
-        if type_ == "circle":
+        if type_ in ["circle", "arc", "arcc"]:
             return tokens[2]
         else:
             return tokens[1]
@@ -104,6 +104,7 @@ def reformat_prose(prose: str):
     result = re.sub("\[Def.*\]", "", result)
     result = re.sub("[^\S\n\t]+\[C.N.*\]\.", ".", result)
     result = re.sub("\[C.N.*\]", "", result)
+    result = re.sub("—", "---", result)
     result = re.sub("[^\S]+---", "---", result)
     result = re.sub("---[^\S]+", "---", result)
     result = re.sub("[^\S]+-", "-", result)
@@ -745,24 +746,25 @@ def generate_scene(
                             disp_text,
                             # tex_template=TexFontTemplates.urw_avant_garde,
                             font_size=45,
-                        )
+                        ).set_fill(BASE_SHAPE_COLOR)
                     )
                     # import ipdb; ipdb.set_trace()
 
                     max_height = config["frame_height"] * (1 - figure_buff)
-                    if par.height > max_height:
-                        par.scale_to_fit_height(max_height)
+                    scroll_distance = par.height - max_height
+                    scroll_mode = scroll_distance > 0
+                    # if par.height > max_height:
+                    #     par.scale_to_fit_height(max_height)
 
-                    par = (
-                        par.set_fill(BASE_SHAPE_COLOR)
-                        .align_on_border(LEFT, buff=0)
-                        .shift(
-                            config["frame_width"]
-                            * (1 - WIDTH_TEXT_PCT)
-                            * RIGHT
-                            # + config["frame_height"] * figure_buff / 2 * DOWN
+                    if not scroll_mode:
+                        par = par.align_on_border(LEFT, buff=0).shift(
+                            config["frame_width"] * (1 - WIDTH_TEXT_PCT) * RIGHT
                         )
-                    )
+                    else:
+                        par = par.align_on_border(UL, buff=0).shift(
+                            config["frame_width"] * (1 - WIDTH_TEXT_PCT) * RIGHT
+                            + config["frame_height"] * figure_buff / 2 * DOWN
+                        )
 
                     # self.play(FadeIn(par))
                     self.add(par)
@@ -795,15 +797,57 @@ def generate_scene(
                                 ]
                             )
                         )
+                    # total_char_count = sum([s.text_char_count for s in sections])
+                    total_duration = tracker.duration
+                    # start_time = self.renderer.time
+                    # time = ValueTracker(self.renderer.time)
+                    # rate = 0.5
+                    # smooth_square = VGroup(Square(), Tex(r"Should\\move\\smoothly"))
+                    # start_time = self.renderer.time
+                    # self.add(smooth_square)
+                    # smooth_square.add_updater(
+                    #     lambda m: smooth_square.set_x(
+                    #         -1 * config["frame_width"] / 2
+                    #         + rate * (self.renderer.time - start_time)
+                    #     )
+                    # )
+                    # par.add_updater(
+                    #     lambda m: par.set_x(
+                    #         -1 * config["frame_width"] / 2
+                    #         + rate * (self.renderer.time - start_time)
+                    #     )
+                    # )
+
+                    # if scroll_mode:
+                        # par.shift(
+                        #     scroll_distance * s.text_char_count / total_char_count * UP
+                        # )
+
+                        # par.add_updater(
+                        #     # lambda m: par.set_y(
+                        #     #     config["frame_height"] / 2 -
+                        #     #     config["frame_height"] * figure_buff / 2
+                        #     #     - (time.get_value() - start_time)
+                        #     #     / total_duration
+                        #     #     * scroll_distance,
+                        #     #     direction=UP,
+                        #     # )
+                        #     # lambda m: par.set_y(time.get_value() - start_time)#print(time.get_value())
+                        # )
 
                     for s in sections:
                         char_counter_new = char_counter + s.text_char_count
                         new_part = par[0][char_counter:char_counter_new]
+                        animations = []
+                        # scroll_anim
                         # print("   >> ", s.text, new_part)
                         if len(s.appearing_shapes) == 0:
-                            self.play(
-                                new_part.animate.set_fill(HIGHLIGHTED_TEXT_COLOR),
-                                run_time=s.duration,
+                            # self.play(
+                            #     new_part.animate.set_fill(HIGHLIGHTED_TEXT_COLOR),
+                            #     run_time=s.duration,
+                            # )
+                            animations.append(
+                                new_part.animate.set_fill(HIGHLIGHTED_TEXT_COLOR)
                             )
                         else:
                             anim_in, anim_out, current_color = get_shape_animations(
@@ -811,25 +855,38 @@ def generate_scene(
                             )
 
                             if prev_anim_out is None:
-                                self.play(
-                                    anim_in,
-                                    new_part.animate.set_fill(current_color),
-                                    run_time=s.duration,
+                                # self.play(
+                                #     run_time=s.duration,
+                                # )
+                                animations.extend(
+                                    [
+                                        anim_in,
+                                        new_part.animate.set_fill(current_color),
+                                    ]
                                 )
                             else:
-                                self.play(
-                                    prev_anim_out,
-                                    anim_in,
-                                    new_part.animate.set_fill(current_color),
-                                    run_time=s.duration,
+                                # self.play(
+                                #     run_time=s.duration,
+                                # )
+                                animations.extend(
+                                    [
+                                        prev_anim_out,
+                                        anim_in,
+                                        new_part.animate.set_fill(current_color),
+                                    ]
                                 )
                                 prev_anim_out = None
                             prev_anim_out = anim_out
 
-                        # if text2 is not None:
-                        #     self.remove(text2)
-                        # text2 = Text(s.text).shift(3.3 * DOWN)
-                        # self.add(text2)
+                        # if scroll_mode:
+                        #     animations.append(time.animate.update(time.get_value() + s.duration))
+                        self.play(*animations, run_time=s.duration)
+                        if scroll_mode:
+                            par.shift(
+                                scroll_distance * s.duration / total_duration * UP
+                            )
+
+
                         char_counter = char_counter_new
 
                     if prev_anim_out is not None:

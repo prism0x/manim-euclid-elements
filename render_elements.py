@@ -1,6 +1,7 @@
 import os
 import json
 import argparse
+import traceback
 from manim import *
 from proposition import generate_scene
 
@@ -83,11 +84,11 @@ for path in books:
         ):
             all_propositions[prop_id] = prop_dict
 
-
+logfile = open("render.log", "a")
 for id, prop_dict in all_propositions.items():
     title = prop_dict["title"]
     book_id, prop_id = [int(i) for i in prop_dict["id"].split(".")]
-    name = "%02d-%02d" % (book_id, prop_id)
+    name = "%02d-%03d" % (book_id, prop_id)
     print(">> Rendering %s into %s" % (id, name))
 
     scene = generate_scene(
@@ -101,9 +102,17 @@ for id, prop_dict in all_propositions.items():
         path = HIGH_QUALITY_DIR + name + ".mp4"
 
     if not os.path.exists(path) or not args.skip_existing:
-        s = scene()
-        s.render(preview=args.preview)
+        try:
+            s = scene()
+            s.render(preview=args.preview)
+        except KeyboardInterrupt:
+            quit()
+        except:
+            logfile.write("#### Failed " + name + "\n")
+            traceback.print_exc(file=logfile)
+            logfile.write("\n\n")
+            logfile.flush()
     else:
         print(">> Skipping render")
-
     config["output_file"] = None
+

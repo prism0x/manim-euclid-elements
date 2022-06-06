@@ -57,18 +57,12 @@ books = [
     "elements-data/data/book-13.json",
 ]
 
-skipped_ids = ["3.25", "3.33", "3.35", "3.36"]
+# skipped_ids = ["3.25", "3.33", "3.35", "3.36"]
+skipped_ids = []
 all_propositions = {}
-
-# for id in args.propositions:
-#     prop_id =  id.split(".")[1]
-#     if prop_id == "*":
-#         args.propositions.remove(id)
-
 
 for path in books:
     book_dict = json.loads(open(path).read())
-    # book_dict = [book_dict[8]]
     basename = os.path.basename(path).split(".")[0]
     for prop_dict in book_dict:
         title = prop_dict["title"]
